@@ -89,6 +89,17 @@ function formatDate(ddmm, time) {
   return time ? `${full} · ${formatTime12(time)}` : full;
 }
 
+function formatDateLong(ddmm, time) {
+  if (!ddmm) return "";
+  const [d, mo] = ddmm.split("/");
+  try {
+    const dt = new Date(`2026-${mo}-${d}T00:00:00`);
+    const weekday = isNaN(dt) ? "" : dt.toLocaleDateString("en-GB", { weekday: "long" });
+    const base = weekday ? `${weekday} ${ddmm}/2026` : `${ddmm}/2026`;
+    return time ? `${base} · ${formatTime12(time)}` : base;
+  } catch { return formatDate(ddmm, time); }
+}
+
 function sortKey(ddmm, time) {
   if (!ddmm || !ddmm.includes("/")) return "";
   const [d, mo] = ddmm.split("/");
@@ -269,6 +280,7 @@ function App() {
 
   const [sessions, setSessions] = useState([]);
   const [availability, setAvailability] = useState({});
+  const [personalUnavail, setPersonalUnavail] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
   const [pinVerified, setPinVerified] = useState(() => sessionStorage.getItem("slp-pin") === "1");
   const [pinInput, setPinInput] = useState("");
@@ -276,6 +288,7 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
   const [showAdd, setShowAdd] = useState(false);
+  const [showAvailCal, setShowAvailCal] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
   const [rightView, setRightView] = useState("week");
   const [calWeekStart, setCalWeekStart] = useState(() => getMonday(new Date()));
@@ -284,7 +297,7 @@ function App() {
   const [showNewNotes, setShowNewNotes] = useState(false);
 
   const saveTimerRef = useRef(null);
-  const latestDataRef = useRef({ sessions: [], availability: {} });
+  const latestDataRef = useRef({ sessions: [], availability: {}, personalUnavail: {} });
 
   // Load on mount
   useEffect(() => {
@@ -293,7 +306,8 @@ function App() {
       .then(data => {
         if (data.sessions) setSessions(data.sessions);
         if (data.availability) setAvailability(data.availability);
-        latestDataRef.current = { sessions: data.sessions || [], availability: data.availability || {} };
+        if (data.personalUnavail) setPersonalUnavail(data.personalUnavail);
+        latestDataRef.current = { sessions: data.sessions || [], availability: data.availability || {}, personalUnavail: data.personalUnavail || {} };
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
@@ -301,7 +315,7 @@ function App() {
 
   // Debounced save — waits 1.5s after last change before writing
   const scheduleSave = useCallback((newSessions, newAvailability) => {
-    latestDataRef.current = { sessions: newSessions, availability: newAvailability };
+    latestDataRef.current = { sessions: newSessions, availability: newAvailability, personalUnavail: latestDataRef.current.personalUnavail || {} };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("saving");
     saveTimerRef.current = setTimeout(() => {
@@ -324,6 +338,10 @@ function App() {
           const incoming = data.availability || {};
           return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
         });
+        setPersonalUnavail(prev => {
+          const incoming = data.personalUnavail || {};
+          return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+        });
       }).catch(() => {});
     }, 12000);
     return () => clearInterval(interval);
@@ -341,6 +359,21 @@ function App() {
     setAvailability(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
       scheduleSave(latestDataRef.current.sessions, next);
+      return next;
+    });
+  }
+
+  function updatePersonalUnavail(fn) {
+    setPersonalUnavail(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      latestDataRef.current = { ...latestDataRef.current, personalUnavail: next };
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveStatus("saving");
+      saveTimerRef.current = setTimeout(() => {
+        writeBin(latestDataRef.current)
+          .then(() => setSaveStatus("saved"))
+          .catch(() => setSaveStatus("error"));
+      }, 1500);
       return next;
     });
   }
@@ -537,6 +570,7 @@ function App() {
                 <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3A5FA5" }} />
                 <span style={{ fontSize: 12, fontWeight: "600", color: "#1D58C4" }}>{currentUser}</span>
               </div>
+              <button onClick={() => setShowAvailCal(true)} style={{ fontSize: 11, color: "#1D58C4", background: "#EEF2FA", border: "1px solid #A8B8D8", borderRadius: 20, padding: "4px 12px", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: "600" }}>My Availability</button>
               <button onClick={() => setCurrentUser(null)} style={{ fontSize: 11, color: "#9AA0AA", background: "none", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", textDecoration: "underline" }}>Switch</button>
             </div>
           )}
@@ -551,7 +585,7 @@ function App() {
             <div style={{ marginBottom: 22 }}>
               <div className="section-title">⟳ Pending · {pending.length}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
               </div>
             </div>
           )}
@@ -559,7 +593,7 @@ function App() {
             <div>
               <div className="section-title">✓ Booked · {booked.length}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
               </div>
             </div>
           )}
@@ -597,6 +631,17 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Availability calendar modal */}
+      {showAvailCal && currentUser && (
+        <AvailabilityCalendar
+          currentUser={currentUser}
+          team={TEAM}
+          personalUnavail={personalUnavail}
+          updatePersonalUnavail={updatePersonalUnavail}
+          onClose={() => setShowAvailCal(false)}
+        />
+      )}
 
       {/* Add session modal */}
       {showAdd && (
@@ -672,10 +717,11 @@ function StatusBadge({ session, size = 14 }) {
 
 // ─── Session Card ─────────────────────────────────────────────────────────────
 
-function SessionCard({ session, active, onClick }) {
+function SessionCard({ session, active, onClick, currentUser, availability, toggleAvailability }) {
   const type = SESSION_TYPES[session.type];
   const confirmed = (session.confirmedStaff || []).length;
   const required = type.required;
+  const myAvail = currentUser ? (availability || {})[`${session.id}-${currentUser}`] : null;
   return (
     <div className={`session-card ${active ? "active" : ""}`} onClick={onClick}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -686,7 +732,7 @@ function SessionCard({ session, active, onClick }) {
             {session.linkedIds?.length > 0 && <span className="linked-badge">linked</span>}
           </div>
           {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
-          {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDate(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
+          {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDateLong(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
           {session.notes && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
@@ -695,6 +741,17 @@ function SessionCard({ session, active, onClick }) {
           {isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
         </div>
       </div>
+      {currentUser && (
+        <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid #F0EEE8" }}>
+          <button
+            onClick={e => { e.stopPropagation(); toggleAvailability(session.id, currentUser); }}
+            className={`avail-chip ${myAvail === "available" ? "avail-available" : myAvail === "unavailable" ? "avail-unavailable" : "avail-none"}`}
+            style={{ fontSize: 10, padding: "3px 8px" }}
+          >
+            {myAvail === "available" ? "✓ I'm available" : myAvail === "unavailable" ? "✕ Can't do this" : "Set my availability"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -807,7 +864,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button className={`avail-chip ${avail === "available" ? "avail-available" : avail === "unavailable" ? "avail-unavailable" : "avail-none"}`} onClick={() => toggleAvailability(session.id, member)}>
-                    {avail === "available" ? "✓ Avail" : avail === "unavailable" ? "✕ Unavail" : "Avail?"}
+                    {avail === "available" ? "✓ Avail" : avail === "unavailable" ? "✕ Unavail" : "Available?"}
                   </button>
                   <button className={`confirm-btn ${isConfirmed ? "confirmed" : "unconfirmed"}`} onClick={() => toggleConfirm(session.id, member)}>
                     {isConfirmed ? "✓ Confirmed" : "Confirm"}
@@ -1194,6 +1251,172 @@ function NeedsConfirmationView({ sessions, onSelectSession, activeSession }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Availability Calendar ────────────────────────────────────────────────────
+
+function AvailabilityCalendar({ currentUser, team, personalUnavail, updatePersonalUnavail, onClose }) {
+  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
+  const [viewUser, setViewUser] = useState(currentUser);
+  const dragRef = useRef({ active: false, mode: "mark", cells: new Set() });
+  const [, redraw] = useState(0);
+
+  const HOURS = Array.from({ length: 19 }, (_, i) => (i + 6) % 24); // 6am – midnight
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  const isEditMode = viewUser === currentUser;
+
+  // Commit drag selection on mouseup
+  useEffect(() => {
+    function onMouseUp() {
+      if (!dragRef.current.active) return;
+      const { mode, cells } = dragRef.current;
+      dragRef.current = { active: false, mode: "mark", cells: new Set() };
+      redraw(n => n + 1);
+      if (!cells.size) return;
+      updatePersonalUnavail(prev => {
+        const next = { ...prev };
+        cells.forEach(cellKey => {
+          const sep = cellKey.lastIndexOf(":");
+          const dayKey = cellKey.slice(0, sep);
+          const hour = parseInt(cellKey.slice(sep + 1));
+          const storeKey = `${viewUser}-${dayKey}`;
+          const existing = next[storeKey] || [];
+          if (mode === "mark") {
+            if (!existing.includes(hour)) next[storeKey] = [...existing, hour].sort((a,b)=>a-b);
+          } else {
+            const filtered = existing.filter(h => h !== hour);
+            if (filtered.length === 0) delete next[storeKey]; else next[storeKey] = filtered;
+          }
+        });
+        return next;
+      });
+    }
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
+  }, [viewUser, updatePersonalUnavail]);
+
+  function cellDown(dayKey, hour) {
+    if (!isEditMode) return;
+    const storeKey = `${viewUser}-${dayKey}`;
+    const currentlyUnavail = (personalUnavail[storeKey] || []).includes(hour);
+    dragRef.current = { active: true, mode: currentlyUnavail ? "clear" : "mark", cells: new Set([`${dayKey}:${hour}`]) };
+    redraw(n => n + 1);
+  }
+
+  function cellEnter(dayKey, hour) {
+    if (!dragRef.current.active || !isEditMode) return;
+    dragRef.current.cells.add(`${dayKey}:${hour}`);
+    redraw(n => n + 1);
+  }
+
+  function cellIsUnavail(dayKey, hour) {
+    const inDrag = dragRef.current.active && dragRef.current.cells.has(`${dayKey}:${hour}`);
+    const committed = (personalUnavail[`${viewUser}-${dayKey}`] || []).includes(hour);
+    if (inDrag) return dragRef.current.mode === "mark";
+    return committed;
+  }
+
+  function clearDay(day) {
+    const dayKey = dateToKey(day);
+    updatePersonalUnavail(prev => {
+      const next = { ...prev };
+      delete next[`${viewUser}-${dayKey}`];
+      return next;
+    });
+  }
+
+  const weekLabel = `${weekStart.toLocaleDateString("en-GB",{day:"numeric",month:"short"})} – ${addDays(weekStart,4).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}`;
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 740, width: "100%", padding: "22px 20px" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: "bold", color: "#1A2130" }}>Team Availability</div>
+            <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 2 }}>{isEditMode ? "Click or drag cells to mark your unavailable hours" : `Viewing ${viewUser}'s schedule — select your name to edit`}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="btn-icon" style={{ padding: "3px 10px" }} onClick={() => setWeekStart(d => addDays(d, -7))}>‹</button>
+            <button className="btn-icon" style={{ padding: "3px 10px" }} onClick={() => setWeekStart(getMonday(today))}>This week</button>
+            <button className="btn-icon" style={{ padding: "3px 10px" }} onClick={() => setWeekStart(d => addDays(d, 7))}>›</button>
+            <button className="btn btn-ghost" style={{ padding: "6px 14px", fontSize: 12 }} onClick={onClose}>Close</button>
+          </div>
+        </div>
+
+        {/* Team member tabs */}
+        <div style={{ display: "flex", gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
+          {team.map(member => (
+            <button key={member} onClick={() => setViewUser(member)}
+              style={{ padding: "4px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", border: "1px solid", background: viewUser === member ? "#3A5FA5" : "#fff", color: viewUser === member ? "#fff" : "#6B7A8D", borderColor: viewUser === member ? "#3A5FA5" : "#D0CCC6", fontWeight: viewUser === member ? "600" : "normal", transition: "all 0.12s" }}
+            >{member}{member === currentUser ? " (you)" : ""}</button>
+          ))}
+        </div>
+
+        {/* Week label */}
+        <div style={{ fontSize: 11, color: "#9AA0AA", marginBottom: 8, fontWeight: "600", letterSpacing: "0.04em" }}>{weekLabel}</div>
+
+        {/* Grid */}
+        <div style={{ overflowY: "auto", maxHeight: "calc(90vh - 260px)", userSelect: "none" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "50px repeat(5, 1fr)", gap: 2 }}>
+
+            {/* Day header row */}
+            <div />
+            {days.map((day, i) => {
+              const isToday = isSameDay(day, today);
+              const dayKey = dateToKey(day);
+              const blockedCount = (personalUnavail[`${viewUser}-${dayKey}`] || []).length;
+              return (
+                <div key={dayKey} style={{ textAlign: "center", padding: "4px 2px 6px", background: isToday ? "#EEF2FA" : "transparent", borderRadius: 5, marginBottom: 2 }}>
+                  <div style={{ fontSize: 9, color: "#9AA0AA", textTransform: "uppercase", letterSpacing: "0.06em" }}>{DAY_SHORT[i]}</div>
+                  <div style={{ fontSize: 15, fontWeight: isToday ? "700" : "400", color: isToday ? "#3A5FA5" : "#1A2130", lineHeight: 1.2 }}>{day.getDate()}</div>
+                  <div style={{ fontSize: 9, color: "#C0BDB8", marginBottom: 2 }}>{day.toLocaleDateString("en-GB",{month:"short"})}</div>
+                  {isEditMode && blockedCount > 0 && (
+                    <button onClick={() => clearDay(day)} title="Clear day" style={{ fontSize: 9, color: "#991B1B", background: "none", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", textDecoration: "underline", padding: 0 }}>clear</button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Hour rows */}
+            {HOURS.flatMap(hour => [
+              <div key={`lbl-${hour}`} style={{ fontSize: 10, color: "#9AA0AA", textAlign: "right", paddingRight: 6, height: 28, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                {formatTime12(`${String(hour).padStart(2,"0")}:00`)}
+              </div>,
+              ...days.map(day => {
+                const dayKey = dateToKey(day);
+                const unavail = cellIsUnavail(dayKey, hour);
+                const isToday = isSameDay(day, today);
+                return (
+                  <button key={`${dayKey}-${hour}`}
+                    onMouseDown={() => cellDown(dayKey, hour)}
+                    onMouseEnter={() => cellEnter(dayKey, hour)}
+                    style={{ height: 28, border: `1px solid ${unavail ? "#FCA5A5" : "#E4E0DA"}`, borderRadius: 3, cursor: isEditMode ? "pointer" : "default", background: unavail ? "#FEE2E2" : isToday ? "#F0F4FF" : "#F7F5F2", transition: "background 0.07s, border-color 0.07s", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    onMouseEnterCapture={() => { if (!unavail && isEditMode) {} }}
+                  >
+                    {unavail && <span style={{ fontSize: 9, color: "#991B1B", fontWeight: "700", pointerEvents: "none" }}>✕</span>}
+                  </button>
+                );
+              })
+            ])}
+          </div>
+        </div>
+
+        {/* Footer legend */}
+        <div style={{ marginTop: 10, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B7A8D" }}>
+            <div style={{ width: 13, height: 13, background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 2 }} /> Unavailable
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B7A8D" }}>
+            <div style={{ width: 13, height: 13, background: "#F7F5F2", border: "1px solid #E4E0DA", borderRadius: 2 }} /> Free
+          </div>
+          {isEditMode && <span style={{ fontSize: 11, color: "#9AA0AA" }}>Drag across multiple cells to block a range at once</span>}
+        </div>
       </div>
     </div>
   );
