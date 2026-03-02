@@ -89,6 +89,17 @@ function formatDate(ddmm, time) {
   return time ? `${full} · ${formatTime12(time)}` : full;
 }
 
+function formatDateLong(ddmm, time) {
+  if (!ddmm) return "";
+  const [d, mo] = ddmm.split("/");
+  try {
+    const dt = new Date(`2026-${mo}-${d}T00:00:00`);
+    const weekday = isNaN(dt) ? "" : dt.toLocaleDateString("en-GB", { weekday: "long" });
+    const base = weekday ? `${weekday} ${ddmm}/2026` : `${ddmm}/2026`;
+    return time ? `${base} · ${formatTime12(time)}` : base;
+  } catch { return formatDate(ddmm, time); }
+}
+
 function sortKey(ddmm, time) {
   if (!ddmm || !ddmm.includes("/")) return "";
   const [d, mo] = ddmm.split("/");
@@ -574,7 +585,7 @@ function App() {
             <div style={{ marginBottom: 22 }}>
               <div className="section-title">⟳ Pending · {pending.length}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
               </div>
             </div>
           )}
@@ -582,7 +593,7 @@ function App() {
             <div>
               <div className="section-title">✓ Booked · {booked.length}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
               </div>
             </div>
           )}
@@ -706,10 +717,11 @@ function StatusBadge({ session, size = 14 }) {
 
 // ─── Session Card ─────────────────────────────────────────────────────────────
 
-function SessionCard({ session, active, onClick }) {
+function SessionCard({ session, active, onClick, currentUser, availability, toggleAvailability }) {
   const type = SESSION_TYPES[session.type];
   const confirmed = (session.confirmedStaff || []).length;
   const required = type.required;
+  const myAvail = currentUser ? (availability || {})[`${session.id}-${currentUser}`] : null;
   return (
     <div className={`session-card ${active ? "active" : ""}`} onClick={onClick}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -720,7 +732,7 @@ function SessionCard({ session, active, onClick }) {
             {session.linkedIds?.length > 0 && <span className="linked-badge">linked</span>}
           </div>
           {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
-          {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDate(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
+          {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDateLong(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
           {session.notes && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
@@ -729,6 +741,17 @@ function SessionCard({ session, active, onClick }) {
           {isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
         </div>
       </div>
+      {currentUser && (
+        <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid #F0EEE8" }}>
+          <button
+            onClick={e => { e.stopPropagation(); toggleAvailability(session.id, currentUser); }}
+            className={`avail-chip ${myAvail === "available" ? "avail-available" : myAvail === "unavailable" ? "avail-unavailable" : "avail-none"}`}
+            style={{ fontSize: 10, padding: "3px 8px" }}
+          >
+            {myAvail === "available" ? "✓ I'm available" : myAvail === "unavailable" ? "✕ Can't do this" : "Set my availability"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
