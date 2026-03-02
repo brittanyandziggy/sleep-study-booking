@@ -38,10 +38,12 @@ const MONTH_NAMES = ["January","February","March","April","May","June","July","A
 const DAY_SHORT = ["Mon","Tue","Wed","Thu","Fri"];
 
 // ─── PIN auth ─────────────────────────────────────────────────────────────────
-const PIN_HASH = "33964349ebca8dbc1ac7924930468aa25bb2ba24311f627d2d599fbb8504ceef"; // sha256("cogscreensleep")
-async function sha256(text) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+// djb2 hash of "cogscreensleep" — works without a secure context (file:// etc.)
+const PIN_HASH = "858ad5ad";
+function djb2(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(h, 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(16).padStart(8, "0");
 }
 
 // ─── JSONBin storage helpers ──────────────────────────────────────────────────
@@ -281,8 +283,8 @@ function App() {
     setRightView("detail");
   }
 
-  async function handlePinSubmit() {
-    const hash = await sha256(pinInput.trim());
+  function handlePinSubmit() {
+    const hash = djb2(pinInput.trim());
     if (hash === PIN_HASH) {
       sessionStorage.setItem("slp-pin", "1");
       setPinVerified(true);
