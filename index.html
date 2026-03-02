@@ -38,13 +38,8 @@ const MONTH_NAMES = ["January","February","March","April","May","June","July","A
 const DAY_SHORT = ["Mon","Tue","Wed","Thu","Fri"];
 
 // ─── PIN auth ─────────────────────────────────────────────────────────────────
-// djb2 hash of "cogscreensleep" — works without a secure context (file:// etc.)
-const PIN_HASH = "858ad5ad";
-function djb2(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = (Math.imul(h, 33) ^ str.charCodeAt(i)) >>> 0;
-  return h.toString(16).padStart(8, "0");
-}
+// btoa("cogscreensleep") — base64 keeps the raw value out of plain sight
+const PIN_B64 = "Y29nc2NyZWVuc2xlZXA=";
 
 // ─── JSONBin storage helpers ──────────────────────────────────────────────────
 
@@ -284,8 +279,7 @@ function App() {
   }
 
   function handlePinSubmit() {
-    const hash = djb2(pinInput.trim());
-    if (hash === PIN_HASH) {
+    if (btoa(pinInput.trim()) === PIN_B64) {
       sessionStorage.setItem("slp-pin", "1");
       setPinVerified(true);
       setPinError(false);
