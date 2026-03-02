@@ -86,7 +86,7 @@ function calcMorningFromEvening(eveningDate, eveningTime) {
 function formatDate(ddmm, time) {
   if (!ddmm) return "";
   const full = `${ddmm}/2026`;
-  return time ? `${full} · ${time}` : full;
+  return time ? `${full} · ${formatTime12(time)}` : full;
 }
 
 function sortKey(ddmm, time) {
@@ -121,6 +121,122 @@ function dateToKey(dt) {
 function isFullyConfirmed(session) {
   const required = SESSION_TYPES[session.type]?.required || 1;
   return (session.confirmedStaff || []).length >= required;
+}
+
+function isLockedIn(session) {
+  return isFullyConfirmed(session) && !!session.calendarAdded;
+}
+
+function formatTime12(timeStr) {
+  if (!timeStr) return "";
+  const [hStr, mStr] = timeStr.split(":");
+  const h = parseInt(hStr, 10);
+  if (isNaN(h)) return timeStr;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${mStr || "00"} ${ampm}`;
+}
+
+// ─── Date Picker ──────────────────────────────────────────────────────────────
+
+function DatePicker({ value, onChange, placeholder = "DD/MM", inputStyle = {} }) {
+  const [showCal, setShowCal] = useState(false);
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+  const [calMonthLocal, setCalMonthLocal] = useState(() => new Date().getMonth());
+  const containerRef = useRef(null);
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  useEffect(() => {
+    if (!showCal) return;
+    function handler(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setShowCal(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showCal]);
+
+  useEffect(() => {
+    if (value && value.includes("/") && value.length === 5) {
+      const [, mo] = value.split("/");
+      const month = parseInt(mo, 10) - 1;
+      if (month >= 0 && month <= 11) { setCalMonthLocal(month); setCalYear(2026); }
+    }
+  }, [value]);
+
+  const firstDay = new Date(calYear, calMonthLocal, 1);
+  const lastDay = new Date(calYear, calMonthLocal + 1, 0);
+  const startMonday = getMonday(firstDay);
+  const endFriday = (() => {
+    const d = new Date(lastDay);
+    const dow = d.getDay();
+    if (dow === 0) d.setDate(d.getDate() - 2);
+    else if (dow === 6) d.setDate(d.getDate() - 1);
+    else d.setDate(d.getDate() + (5 - dow));
+    return d;
+  })();
+  const weekdays = [];
+  const cursor = new Date(startMonday);
+  while (cursor <= endFriday) {
+    if (cursor.getDay() >= 1 && cursor.getDay() <= 5) weekdays.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const selectedDate = (() => {
+    if (!value || !value.includes("/") || value.length !== 5) return null;
+    const [d, mo] = value.split("/");
+    try { const dt = new Date(`2026-${mo}-${d}T00:00:00`); return isNaN(dt) ? null : dt; }
+    catch { return null; }
+  })();
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <input
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          maxLength={5}
+          style={{ width: 80, ...inputStyle }}
+        />
+        <button
+          type="button"
+          onClick={() => setShowCal(v => !v)}
+          style={{ padding: "6px 8px", border: "1px solid #D0CCC6", borderRadius: 4, background: showCal ? "#EEF2FA" : "#fff", cursor: "pointer", fontSize: 13, color: "#3A5FA5", lineHeight: 1, flexShrink: 0 }}
+          title="Pick a date"
+        >▦</button>
+      </div>
+      {showCal && (
+        <div style={{ position: "absolute", zIndex: 300, background: "#fff", border: "1px solid #D0CCC6", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.13)", padding: "12px 10px", top: "calc(100% + 4px)", left: 0, minWidth: 242 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <button className="btn-icon" style={{ padding: "2px 8px" }} onClick={() => { if (calMonthLocal === 0) { setCalYear(y => y-1); setCalMonthLocal(11); } else setCalMonthLocal(m => m-1); }}>‹</button>
+            <span style={{ fontSize: 12, fontWeight: "700", color: "#1A2130" }}>{MONTH_NAMES[calMonthLocal]} {calYear}</span>
+            <button className="btn-icon" style={{ padding: "2px 8px" }} onClick={() => { if (calMonthLocal === 11) { setCalYear(y => y+1); setCalMonthLocal(0); } else setCalMonthLocal(m => m+1); }}>›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 2, marginBottom: 4 }}>
+            {DAY_SHORT.map(d => <div key={d} style={{ textAlign: "center", fontSize: 9, color: "#9AA0AA", fontWeight: "700", padding: "2px 0", textTransform: "uppercase" }}>{d}</div>)}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 2 }}>
+            {weekdays.map(day => {
+              const isToday = isSameDay(day, today);
+              const isSel = selectedDate && isSameDay(day, selectedDate);
+              const inMonth = day.getMonth() === calMonthLocal;
+              return (
+                <button key={day.toISOString()} onClick={() => { onChange(dateToKey(day)); setShowCal(false); }}
+                  style={{ padding: "5px 2px", border: isSel ? "none" : isToday ? "2px solid #3A5FA5" : "1px solid transparent", cursor: "pointer", borderRadius: 6, textAlign: "center", fontSize: 12, fontFamily: "Arial, Helvetica, sans-serif", background: isSel ? "#3A5FA5" : isToday ? "#EEF2FA" : "transparent", color: isSel ? "#fff" : isToday ? "#3A5FA5" : !inMonth ? "#C0BDB8" : "#1A2130", fontWeight: (isToday || isSel) ? "700" : "normal", transition: "all 0.1s" }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = "#EEF2FA"; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = isToday ? "#EEF2FA" : "transparent"; }}
+                >{day.getDate()}</button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 8, borderTop: "1px solid #F0EEE8", paddingTop: 6, textAlign: "center" }}>
+            <button onClick={() => { onChange(dateToKey(today)); setShowCal(false); }} style={{ fontSize: 11, color: "#3A5FA5", background: "none", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: "600" }}>Today ({dateToKey(today)})</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Setup screen (shown when credentials are missing) ────────────────────────
@@ -232,12 +348,12 @@ function App() {
   function addSession() {
     const toAdd = [];
     if (newSession.type === "screening") {
-      toAdd.push({ id: generateId(), type: "screening", date: newSession.date || null, time: newSession.time || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [], confirmedStaff: [] });
+      toAdd.push({ id: generateId(), type: "screening", date: newSession.date || null, time: newSession.time || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [], confirmedStaff: [], calendarAdded: false });
     } else {
       const eveningId = generateId(), morningId = generateId();
       const { date: mDate, time: mTime } = calcMorningFromEvening(newSession.eveningDate, newSession.eveningTime);
-      toAdd.push({ id: eveningId, type: "evening", date: newSession.eveningDate || null, time: newSession.eveningTime || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [morningId], confirmedStaff: [] });
-      toAdd.push({ id: morningId, type: "morning", date: mDate || null, time: mTime || null, participantId: newSession.participantId || null, notes: "", linkedIds: [eveningId], confirmedStaff: [] });
+      toAdd.push({ id: eveningId, type: "evening", date: newSession.eveningDate || null, time: newSession.eveningTime || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [morningId], confirmedStaff: [], calendarAdded: false });
+      toAdd.push({ id: morningId, type: "morning", date: mDate || null, time: mTime || null, participantId: newSession.participantId || null, notes: "", linkedIds: [eveningId], confirmedStaff: [], calendarAdded: false });
     }
     updateSessions(prev => [...prev, ...toAdd]);
     setNewSession({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
@@ -263,6 +379,16 @@ function App() {
       const confirmed = s.confirmedStaff || [];
       return { ...s, confirmedStaff: confirmed.includes(member) ? confirmed.filter(m => m !== member) : [...confirmed, member] };
     }));
+  }
+
+  function toggleCalendarAdded(sessionId) {
+    updateSessions(prev => {
+      const session = prev.find(s => s.id === sessionId);
+      if (!session) return prev;
+      const newVal = !session.calendarAdded;
+      const linked = new Set([sessionId, ...(session.linkedIds || [])]);
+      return prev.map(s => linked.has(s.id) ? { ...s, calendarAdded: newVal } : s);
+    });
   }
 
   function removeSession(id) {
@@ -457,7 +583,7 @@ function App() {
           <div style={{ flex: 1, overflow: "auto" }}>
             {rightView === "detail" && selectedSession ? (
               <div style={{ padding: "24px 28px" }}>
-                <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} />
+                <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} toggleCalendarAdded={toggleCalendarAdded} />
               </div>
             ) : rightView === "week" ? (
               <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
@@ -489,8 +615,8 @@ function App() {
               <input type="text" value={newSession.participantId} onChange={e => setNewSession({ ...newSession, participantId: e.target.value })} placeholder="e.g. P042" />
             </div>
             {newSession.type === "screening" ? (
-              <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-                <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(DD/MM, blank = TBC)</span></label><input type="text" value={newSession.date} onChange={e => setNewSession({ ...newSession, date: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+                <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(blank = TBC)</span></label><DatePicker value={newSession.date} onChange={v => setNewSession({ ...newSession, date: v })} /></div>
                 <div><label>Time</label><input type="time" value={newSession.time} onChange={e => setNewSession({ ...newSession, time: e.target.value })} style={{ width: 130 }} /></div>
               </div>
             ) : (
@@ -498,8 +624,8 @@ function App() {
                 <div style={{ background: "#EEF2FA", borderRadius: 5, padding: "7px 11px", fontSize: 12, color: "#1D58C4", marginBottom: 12 }}>Morning session auto-set to 12 hours after evening.</div>
                 <div style={{ background: "#F7F5F2", borderRadius: 6, padding: 12, marginBottom: 10, border: "1px solid #E4E0DA" }}>
                   <div style={{ fontSize: 11, color: "#1D58C4", marginBottom: 8, fontWeight: "bold" }}>◑ EVENING SESSION</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <div><label>Date (DD/MM)</label><input type="text" value={newSession.eveningDate} onChange={e => setNewSession({ ...newSession, eveningDate: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div><label>Date</label><DatePicker value={newSession.eveningDate} onChange={v => setNewSession({ ...newSession, eveningDate: v })} /></div>
                     <div><label>Time</label><input type="time" value={newSession.eveningTime} onChange={e => setNewSession({ ...newSession, eveningTime: e.target.value })} style={{ width: 130 }} /></div>
                   </div>
                 </div>
@@ -507,7 +633,7 @@ function App() {
                   <div style={{ fontSize: 11, color: "#9A7C00", marginBottom: 8, fontWeight: "bold" }}>◐ MORNING SESSION <span style={{ color: "#9AA0AA", fontWeight: "normal", fontSize: 10 }}>auto</span></div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <div><label>Date</label><input className="auto-field" type="text" value={morningPreview.date} readOnly placeholder="—" style={{ width: 100 }} /></div>
-                    <div><label>Time</label><input className="auto-field" type="text" value={morningPreview.time} readOnly placeholder="—" style={{ width: 130 }} /></div>
+                    <div><label>Time</label><input className="auto-field" type="text" value={formatTime12(morningPreview.time)} readOnly placeholder="—" style={{ width: 130 }} /></div>
                   </div>
                 </div>
               </>
@@ -532,9 +658,14 @@ function App() {
 function StatusBadge({ session, size = 14 }) {
   if (!session.date) return null;
   const ok = isFullyConfirmed(session);
+  const locked = isLockedIn(session);
+  const bg = locked ? "#CCFBF1" : ok ? "#D1FAE5" : "#FEE2E2";
+  const color = locked ? "#0F766E" : ok ? "#065F46" : "#991B1B";
+  const border = locked ? "#5EEAD4" : ok ? "#6EE7B7" : "#FCA5A5";
+  const label = locked ? "◉" : ok ? "✓" : "?";
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size + 4, height: size + 4, borderRadius: "50%", background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: size - 3, fontWeight: "bold", flexShrink: 0, border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}` }}>
-      {ok ? "✓" : "?"}
+    <span title={locked ? "Fully confirmed + in Outlook" : ok ? "Fully confirmed" : "Needs staff"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size + 4, height: size + 4, borderRadius: "50%", background: bg, color, fontSize: size - 3, fontWeight: "bold", flexShrink: 0, border: `1px solid ${border}` }}>
+      {label}
     </span>
   );
 }
@@ -561,6 +692,7 @@ function SessionCard({ session, active, onClick }) {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <StatusBadge session={session} />
           {session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
+          {isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
         </div>
       </div>
     </div>
@@ -569,7 +701,7 @@ function SessionCard({ session, active, onClick }) {
 
 // ─── Session Detail ───────────────────────────────────────────────────────────
 
-function SessionDetail({ session, sessions, updateSessions, team, availability, toggleAvailability, toggleConfirm, removeSession }) {
+function SessionDetail({ session, sessions, updateSessions, team, availability, toggleAvailability, toggleConfirm, removeSession, toggleCalendarAdded }) {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
   const [showEditNotes, setShowEditNotes] = useState(!!session.notes);
@@ -620,8 +752,8 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
       {editing && (
         <div style={{ background: "#F7F5F2", borderRadius: 8, padding: 16, marginBottom: 20, border: "1px solid #E4E0DA" }}>
           <div style={{ marginBottom: 12 }}><label>Participant ID</label><input type="text" value={editData.participantId} onChange={e => setEditData({ ...editData, participantId: e.target.value })} placeholder="e.g. P042" /></div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <div><label>Date (DD/MM)</label><input type="text" value={editData.date} onChange={e => setEditData({ ...editData, date: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(DD/MM)</span></label><DatePicker value={editData.date} onChange={v => setEditData({ ...editData, date: v })} /></div>
             <div><label>Time</label><input type="time" value={editData.time} onChange={e => setEditData({ ...editData, time: e.target.value })} style={{ width: 130 }} /></div>
           </div>
           {session.type === "evening" && editMorningPreview.date && (
@@ -694,6 +826,35 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
           </div>
         )}
       </div>
+
+      {/* Outlook calendar lock-in */}
+      {session.date && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="section-title">Outlook Calendar</div>
+          {!isFullyConfirmed(session) ? (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "#F7F5F2", border: "1px solid #E4E0DA", fontSize: 12, color: "#9AA0AA" }}>
+              Available once all required staff are confirmed ({confirmed.length}/{required}).
+            </div>
+          ) : (
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: session.calendarAdded ? "#F0FDF9" : "#FEFCE8", border: `1px solid ${session.calendarAdded ? "#5EEAD4" : "#FCD34D"}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: "700", color: session.calendarAdded ? "#0F766E" : "#854D0E", marginBottom: 2 }}>
+                  {session.calendarAdded ? "◉ Added to Outlook — Locked in" : "○ Not yet in Outlook"}
+                </div>
+                <div style={{ fontSize: 11, color: session.calendarAdded ? "#0F766E" : "#A16207" }}>
+                  {session.calendarAdded
+                    ? session.linkedIds?.length > 0 ? "Both sessions locked in to the schedule" : "Session locked in to the schedule"
+                    : "Fully staffed — ready to add to the Teams calendar"}
+                </div>
+              </div>
+              <button
+                onClick={() => toggleCalendarAdded(session.id)}
+                style={{ padding: "7px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: "600", flexShrink: 0, background: session.calendarAdded ? "#fff" : "#0F766E", color: session.calendarAdded ? "#A03030" : "#fff", border: `1px solid ${session.calendarAdded ? "#FCA5A5" : "#0F766E"}`, transition: "all 0.15s" }}
+              >{session.calendarAdded ? "Unmark" : "Mark as Added"}</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -717,7 +878,7 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
           <div style={{ fontWeight: "bold", fontSize: 10, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
           </div>
-          {session.time && <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{session.time}</div>}
+          {session.time && <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{formatTime12(session.time)}</div>}
           {availMembers.length > 0 && (
             <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2 }}>
               {availMembers.map(m => (
@@ -728,9 +889,10 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
             </div>
           )}
         </div>
-        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", flexShrink: 0, background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: 8, fontWeight: "bold", border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}`, marginTop: 1 }}>
-          {ok ? "✓" : "?"}
-        </span>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+          <StatusBadge session={session} size={12} />
+          {isLockedIn(session) && <span style={{ fontSize: 7, color: "#0F766E", background: "#CCFBF1", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontWeight: "700" }}>OL</span>}
+        </div>
       </div>
     </button>
   );
@@ -748,7 +910,10 @@ function Legend() {
       ))}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 8, borderLeft: "1px solid #E4E0DA", paddingLeft: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6B7A8D" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#D1FAE5", color: "#065F46", fontSize: 8, fontWeight: "bold", border: "1px solid #6EE7B7" }}>✓</span> Fully confirmed
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#CCFBF1", color: "#0F766E", fontSize: 8, fontWeight: "bold", border: "1px solid #5EEAD4" }}>◉</span> In Outlook
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6B7A8D" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#D1FAE5", color: "#065F46", fontSize: 8, fontWeight: "bold", border: "1px solid #6EE7B7" }}>✓</span> Confirmed
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6B7A8D" }}>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#FEE2E2", color: "#991B1B", fontSize: 8, fontWeight: "bold", border: "1px solid #FCA5A5" }}>?</span> Needs staff
@@ -906,7 +1071,7 @@ function ListView({ sessions, team, onSelectSession, activeSession }) {
                     onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E4E0DA"; }}}
                   >
                     <div style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: t.color, flexShrink: 0 }} />
-                    <div style={{ width: 44, flexShrink: 0, textAlign: "right" }}><span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time || "—"}</span></div>
+                    <div style={{ width: 56, flexShrink: 0, textAlign: "right" }}><span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time ? formatTime12(s.time) : "—"}</span></div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                         <span style={{ fontSize: 12, fontWeight: "700", color: t.textColor }}>{t.label}</span>
@@ -1003,8 +1168,8 @@ function NeedsConfirmationView({ sessions, onSelectSession, activeSession }) {
                     onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#FCA5A5"; }}}
                   >
                     <div style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: t.color, flexShrink: 0 }} />
-                    <div style={{ width: 44, flexShrink: 0, textAlign: "right" }}>
-                      <span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time || "—"}</span>
+                    <div style={{ width: 56, flexShrink: 0, textAlign: "right" }}>
+                      <span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time ? formatTime12(s.time) : "—"}</span>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
