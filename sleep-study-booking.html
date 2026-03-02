@@ -26,6 +26,7 @@ const JSONBIN_BIN_ID   = "69a52dddae596e708f56ec5a";    // e.g. 664abc123def...
 const { useState, useEffect, useRef, useCallback } = React;
 
 const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
+const MEMBER_ABBR = { Freida: "Fr", Alex: "Al", Mackenzie: "Mc", Brittany: "Br", Maddie: "Ma" };
 
 const SESSION_TYPES = {
   screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
@@ -35,6 +36,13 @@ const SESSION_TYPES = {
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAY_SHORT = ["Mon","Tue","Wed","Thu","Fri"];
+
+// ─── PIN auth ─────────────────────────────────────────────────────────────────
+const PIN_HASH = "33964349ebca8dbc1ac7924930468aa25bb2ba24311f627d2d599fbb8504ceef"; // sha256("cogscreensleep")
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 // ─── JSONBin storage helpers ──────────────────────────────────────────────────
 
@@ -149,6 +157,9 @@ function App() {
   const [sessions, setSessions] = useState([]);
   const [availability, setAvailability] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
+  const [pinVerified, setPinVerified] = useState(() => sessionStorage.getItem("slp-pin") === "1");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
   const [showAdd, setShowAdd] = useState(false);
@@ -270,6 +281,19 @@ function App() {
     setRightView("detail");
   }
 
+  async function handlePinSubmit() {
+    const hash = await sha256(pinInput.trim());
+    if (hash === PIN_HASH) {
+      sessionStorage.setItem("slp-pin", "1");
+      setPinVerified(true);
+      setPinError(false);
+      setPinInput("");
+    } else {
+      setPinError(true);
+      setPinInput("");
+    }
+  }
+
   if (!isConfigured) return <SetupScreen />;
 
   if (!loaded) {
@@ -335,8 +359,31 @@ function App() {
         .notes-toggle { background: none; border: none; color: #3A5FA5; font-size: 12px; cursor: pointer; padding: 0; font-family: Arial, Helvetica, sans-serif; text-decoration: underline; }
       `}</style>
 
+      {/* PIN gate */}
+      {!pinVerified && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(247,245,242,0.97)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", border: "1px solid #E4E0DA", borderRadius: 14, padding: "40px 44px", boxShadow: "0 8px 40px rgba(0,0,0,0.10)", textAlign: "center", maxWidth: 340, width: "100%" }}>
+            <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 6 }}>Sleep Study</div>
+            <div style={{ fontSize: 13, color: "#9AA0AA", marginBottom: 24 }}>Enter passcode to continue</div>
+            <input
+              type="password"
+              value={pinInput}
+              onChange={e => { setPinInput(e.target.value); setPinError(false); }}
+              onKeyDown={e => e.key === "Enter" && handlePinSubmit()}
+              placeholder="Passcode"
+              autoFocus
+              style={{ width: "100%", padding: "12px 14px", fontSize: 15, borderRadius: 8, border: `1px solid ${pinError ? "#EF4444" : "#E4E0DA"}`, marginBottom: 10, boxSizing: "border-box", fontFamily: "Arial,Helvetica,sans-serif", outline: "none" }}
+            />
+            {pinError && <div style={{ color: "#EF4444", fontSize: 12, marginBottom: 10 }}>Incorrect passcode — try again.</div>}
+            <button onClick={handlePinSubmit} style={{ width: "100%", padding: "12px", fontSize: 15, fontWeight: "600", background: "#3A5FA5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Arial,Helvetica,sans-serif" }}>
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Who are you? splash */}
-      {!currentUser && (
+      {pinVerified && !currentUser && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(247,245,242,0.97)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#fff", border: "1px solid #E4E0DA", borderRadius: 14, padding: "40px 44px", boxShadow: "0 8px 40px rgba(0,0,0,0.10)", textAlign: "center", maxWidth: 360, width: "100%" }}>
             <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 6 }}>Sleep Study</div>
@@ -409,6 +456,7 @@ function App() {
             <button className={`view-tab ${rightView === "week" ? "active" : ""}`} onClick={() => setRightView("week")}>WEEK</button>
             <button className={`view-tab ${rightView === "month" ? "active" : ""}`} onClick={() => setRightView("month")}>MONTH</button>
             <button className={`view-tab ${rightView === "list" ? "active" : ""}`} onClick={() => setRightView("list")}>LIST</button>
+            <button className={`view-tab ${rightView === "needs" ? "active" : ""}`} onClick={() => setRightView("needs")}>NEEDS</button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
             {rightView === "detail" && selectedSession ? (
@@ -416,9 +464,11 @@ function App() {
                 <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} />
               </div>
             ) : rightView === "week" ? (
-              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} />
+              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
             ) : rightView === "month" ? (
-              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} />
+              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
+            ) : rightView === "needs" ? (
+              <NeedsConfirmationView sessions={sessions} onSelectSession={selectSession} activeSession={activeSession} />
             ) : (
               <ListView sessions={sessions} team={TEAM} onSelectSession={selectSession} activeSession={activeSession} />
             )}
@@ -654,24 +704,35 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
 
 // ─── Calendar Chip ────────────────────────────────────────────────────────────
 
-function CalChip({ session, onClick, compact = false }) {
+function CalChip({ session, onClick, compact = false, availability = null }) {
   const t = SESSION_TYPES[session.type];
   const ok = isFullyConfirmed(session);
   const typeShort = session.type === "screening" ? "Screening" : session.type === "evening" ? "Evening" : "Morning";
+  const availMembers = availability
+    ? TEAM.filter(m => availability[`${session.id}-${m}`] === "available")
+    : [];
   return (
     <button className="cal-chip" onClick={onClick}
-      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "3px 5px" : "4px 6px" }}
+      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "5px 6px" : "4px 6px" }}
       title={`${t.label}${session.participantId ? " — " + session.participantId : ""}${session.time ? " · " + session.time : ""}`}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 4, justifyContent: "space-between" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: "bold", fontSize: 10, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
           </div>
-          {session.time && !compact && <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.2 }}>{session.time}</div>}
-          {compact && session.time && <span style={{ fontSize: 10, opacity: 0.7 }}> {session.time}</span>}
+          {session.time && <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{session.time}</div>}
+          {availMembers.length > 0 && (
+            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2 }}>
+              {availMembers.map(m => (
+                <span key={m} style={{ fontSize: 8, fontWeight: "700", color: "#065F46", background: "#D1FAE5", borderRadius: 2, padding: "0 3px", lineHeight: "1.6" }}>
+                  {MEMBER_ABBR[m]}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", flexShrink: 0, background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: 8, fontWeight: "bold", border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}` }}>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", flexShrink: 0, background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: 8, fontWeight: "bold", border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}`, marginTop: 1 }}>
           {ok ? "✓" : "?"}
         </span>
       </div>
@@ -703,7 +764,7 @@ function Legend() {
 
 // ─── Week View ────────────────────────────────────────────────────────────────
 
-function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession }) {
+function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {} }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
   const fmtH = d => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
@@ -731,7 +792,7 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
                 <div style={{ fontSize: 10, color: "#C0BDB8" }}>{day.toLocaleDateString("en-GB",{month:"short"})}</div>
               </div>
               <div style={{ flex: 1 }}>
-                {daySessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} />)}
+                {daySessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} availability={availability} />)}
               </div>
               {daySessions.length === 0 && <div style={{ fontSize: 10, color: "#E0DDD9", textAlign: "center", marginTop: "auto" }}>—</div>}
             </div>
@@ -745,7 +806,7 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
 
 // ─── Month View ───────────────────────────────────────────────────────────────
 
-function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession }) {
+function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {} }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -785,12 +846,12 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession }) {
           const isToday = isSameDay(day, today);
           const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
           return (
-            <div key={key} style={{ minHeight: 80, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : !inMonth ? "#FAFAF8" : "#fff" }}>
+            <div key={key} style={{ minHeight: 110, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : !inMonth ? "#FAFAF8" : "#fff" }}>
               <div style={{ fontSize: 12, fontWeight: isToday ? "700" : "400", color: isToday ? "#3A5FA5" : !inMonth ? "#C0BDB8" : "#1A2130", marginBottom: 3 }}>
                 {isToday ? <span style={{ background: "#3A5FA5", color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>{day.getDate()}</span> : day.getDate()}
               </div>
-              {daySessions.slice(0,3).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact />)}
-              {daySessions.length > 3 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{daySessions.length - 3} more</div>}
+              {daySessions.slice(0,4).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact availability={availability} />)}
+              {daySessions.length > 4 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{daySessions.length - 4} more</div>}
             </div>
           );
         })}
@@ -863,6 +924,109 @@ function ListView({ sessions, team, onSelectSession, activeSession }) {
                       </div>
                     </div>
                     <StatusBadge session={s} size={16} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Needs Confirmation View ──────────────────────────────────────────────────
+
+function NeedsConfirmationView({ sessions, onSelectSession, activeSession }) {
+  const needsSessions = sessions
+    .filter(s => !isFullyConfirmed(s))
+    .sort((a, b) => {
+      if (!a.date && !b.date) return 0;
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time));
+    });
+
+  const grouped = {};
+  needsSessions.forEach(s => {
+    const key = s.date || "__tbc__";
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(s);
+  });
+  const dateKeys = Object.keys(grouped).sort((a, b) => {
+    if (a === "__tbc__") return 1;
+    if (b === "__tbc__") return -1;
+    return a.localeCompare(b);
+  });
+
+  function formatGroupDate(ddmm) {
+    if (!ddmm) return "Date TBC";
+    const [d, mo] = ddmm.split("/");
+    const dt = new Date(`2026-${mo}-${d}T00:00:00`);
+    return isNaN(dt) ? ddmm : dt.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  if (needsSessions.length === 0) {
+    return (
+      <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%" }}>
+        <div style={{ textAlign: "center", color: "#276644", fontSize: 13 }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
+          All sessions are fully confirmed!
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "20px 24px", height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: "700", color: "#1A2130" }}>
+          Needs Confirmation
+          <span style={{ marginLeft: 8, fontSize: 12, color: "#991B1B", background: "#FEE2E2", borderRadius: 10, padding: "1px 8px" }}>{needsSessions.length}</span>
+        </div>
+        <div style={{ fontSize: 12, color: "#9AA0AA", marginTop: 2 }}>Sessions that still need staff to lock in before moving to Outlook</div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {dateKeys.map(dateKey => (
+          <div key={dateKey} style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: "700", color: "#9AA0AA", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #E4E0DA" }}>
+              {formatGroupDate(dateKey === "__tbc__" ? null : dateKey)}
+              {dateKey !== "__tbc__" && <span style={{ fontWeight: "400", color: "#C0BDB8" }}> · {dateKey}/2026</span>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {grouped[dateKey].map(s => {
+                const t = SESSION_TYPES[s.type];
+                const confirmed = s.confirmedStaff || [];
+                const required = t.required;
+                const stillNeeded = required - confirmed.length;
+                const isActive = s.id === activeSession;
+                return (
+                  <div key={s.id} onClick={() => onSelectSession(s.id)}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 14px", borderRadius: 7, cursor: "pointer", background: isActive ? "#EEF2FA" : "#fff", border: `1px solid ${isActive ? "#3A5FA5" : "#FCA5A5"}`, transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "#FFF5F5"; e.currentTarget.style.borderColor = "#FC8A8A"; }}}
+                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#FCA5A5"; }}}
+                  >
+                    <div style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: t.color, flexShrink: 0 }} />
+                    <div style={{ width: 44, flexShrink: 0, textAlign: "right" }}>
+                      <span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time || "—"}</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: "700", color: t.textColor }}>{t.label}</span>
+                        {s.participantId && <span style={{ fontSize: 12, color: "#1A2130", fontWeight: "600" }}>· {s.participantId}</span>}
+                        <span style={{ fontSize: 10, color: "#991B1B", background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 10, padding: "1px 7px", marginLeft: "auto" }}>
+                          needs {stillNeeded} more
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {confirmed.length > 0
+                          ? confirmed.map(m => (
+                              <span key={m} style={{ fontSize: 10, color: "#065F46", background: "#D1FAE5", border: "1px solid #6EE7B755", borderRadius: 3, padding: "1px 7px" }}>✓ {m}</span>
+                            ))
+                          : <span style={{ fontSize: 10, color: "#9AA0AA", fontStyle: "italic" }}>No staff confirmed yet</span>
+                        }
+                      </div>
+                    </div>
                   </div>
                 );
               })}
