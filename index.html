@@ -864,7 +864,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button className={`avail-chip ${avail === "available" ? "avail-available" : avail === "unavailable" ? "avail-unavailable" : "avail-none"}`} onClick={() => toggleAvailability(session.id, member)}>
-                    {avail === "available" ? "✓ Avail" : avail === "unavailable" ? "✕ Unavail" : "Avail?"}
+                    {avail === "available" ? "✓ Avail" : avail === "unavailable" ? "✕ Unavail" : "Available?"}
                   </button>
                   <button className={`confirm-btn ${isConfirmed ? "confirmed" : "unconfirmed"}`} onClick={() => toggleConfirm(session.id, member)}>
                     {isConfirmed ? "✓ Confirmed" : "Confirm"}
@@ -1264,7 +1264,7 @@ function AvailabilityCalendar({ currentUser, team, personalUnavail, updatePerson
   const dragRef = useRef({ active: false, mode: "mark", cells: new Set() });
   const [, redraw] = useState(0);
 
-  const HOURS = Array.from({ length: 16 }, (_, i) => i + 7); // 7am – 10pm
+  const HOURS = Array.from({ length: 19 }, (_, i) => (i + 6) % 24); // 6am – midnight
   const today = new Date(); today.setHours(0,0,0,0);
   const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
   const isEditMode = viewUser === currentUser;
