@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sleep Study Booking</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #F7F5F2; }
+    #root { height: 100vh; display: flex; flex-direction: column; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIGURATION — fill these in after following the setup guide
+// ─────────────────────────────────────────────────────────────────────────────
+const JSONBIN_API_KEY  = "$2a$10$domjXbDJJp.3bAO8m5sCceEoZGkjao6cMgb3hspM1yvloBVl/m7pa";   // e.g. $2a$10$abc...
+const JSONBIN_BIN_ID   = "69a52dddae596e708f56ec5a";    // e.g. 664abc123def...
+// ─────────────────────────────────────────────────────────────────────────────
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
+
+const SESSION_TYPES = {
+  screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
+  evening:   { label: "Evening Study", color: "#1D58C4", bg: "#DBEAFE", textColor: "#0D2E7A", required: 2 },
+  morning:   { label: "Morning Study", color: "#EAB308", bg: "#FEF9C3", textColor: "#7A5800", required: 2 },
+};
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAY_SHORT = ["Mon","Tue","Wed","Thu","Fri"];
+
+// ─── JSONBin storage helpers ──────────────────────────────────────────────────
+
+async function readBin() {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
+    headers: { "X-Master-Key": JSONBIN_API_KEY, "X-Bin-Meta": "false" }
+  });
+  if (!res.ok) throw new Error("Read failed: " + res.status);
+  return await res.json();
+}
+
+async function writeBin(data) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": JSONBIN_API_KEY,
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Write failed: " + res.status);
+  return await res.json();
+}
+
+// ─── Utility functions ────────────────────────────────────────────────────────
+
+function generateId() { return Math.random().toString(36).substr(2, 9); }
+
+function calcMorningFromEvening(eveningDate, eveningTime) {
+  if (!eveningDate || !eveningTime || !eveningDate.includes("/")) return { date: "", time: "" };
+  const [d, mo] = eveningDate.split("/");
+  if (!d || !mo || d.length !== 2 || mo.length !== 2) return { date: "", time: "" };
+  try {
+    const dt = new Date(`2026-${mo}-${d}T${eveningTime}:00`);
+    if (isNaN(dt)) return { date: "", time: "" };
+    dt.setMinutes(dt.getMinutes() + 12 * 60);
+    return {
+      date: `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}`,
+      time: `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`,
+    };
+  } catch (e) { return { date: "", time: "" }; }
+}
+
+function formatDate(ddmm, time) {
+  if (!ddmm) return "";
+  const full = `${ddmm}/2026`;
+  return time ? `${full} · ${time}` : full;
+}
+
+function sortKey(ddmm, time) {
+  if (!ddmm || !ddmm.includes("/")) return "";
+  const [d, mo] = ddmm.split("/");
+  return `2026-${mo}-${d}T${time || "00:00"}`;
+}
+
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function dateToKey(dt) {
+  return `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}`;
+}
+
+function isFullyConfirmed(session) {
+  const required = SESSION_TYPES[session.type]?.required || 1;
+  return (session.confirmedStaff || []).length >= required;
+}
+
+// ─── Setup screen (shown when credentials are missing) ────────────────────────
+
+function SetupScreen() {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F7F5F2", padding: 24 }}>
+      <div style={{ background: "#fff", border: "1px solid #E4E0DA", borderRadius: 14, padding: "40px 44px", maxWidth: 520, width: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 6, color: "#1A2130" }}>Setup required</div>
+        <div style={{ fontSize: 14, color: "#6B7A8D", marginBottom: 24, lineHeight: 1.6 }}>
+          The app hasn't been configured yet. Please follow the setup guide to fill in your JSONBin API key and Bin ID in the HTML file, then reload this page.
+        </div>
+        <div style={{ background: "#F0F4FF", border: "1px solid #A8B8D8", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#1D58C4", lineHeight: 1.7 }}>
+          <strong>Quick steps:</strong><br />
+          1. Go to <strong>jsonbin.io</strong> and create a free account<br />
+          2. Create a new Bin with content: <code style={{ background: "#fff", padding: "1px 4px", borderRadius: 3 }}>{`{"sessions":[],"availability":{}}`}</code><br />
+          3. Copy your Master Key and Bin ID<br />
+          4. Open the HTML file in a text editor and replace the two placeholder values at the top<br />
+          5. Save and re-open — done!
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
+function App() {
+  const isConfigured = JSONBIN_API_KEY !== "REPLACE_WITH_YOUR_API_KEY" && JSONBIN_BIN_ID !== "REPLACE_WITH_YOUR_BIN_ID";
+
+  const [sessions, setSessions] = useState([]);
+  const [availability, setAvailability] = useState({});
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
+  const [showAdd, setShowAdd] = useState(false);
+  const [activeSession, setActiveSession] = useState(null);
+  const [rightView, setRightView] = useState("week");
+  const [calWeekStart, setCalWeekStart] = useState(() => getMonday(new Date()));
+  const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
+  const [newSession, setNewSession] = useState({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
+  const [showNewNotes, setShowNewNotes] = useState(false);
+
+  const saveTimerRef = useRef(null);
+  const latestDataRef = useRef({ sessions: [], availability: {} });
+
+  // Load on mount
+  useEffect(() => {
+    if (!isConfigured) return;
+    readBin()
+      .then(data => {
+        if (data.sessions) setSessions(data.sessions);
+        if (data.availability) setAvailability(data.availability);
+        latestDataRef.current = { sessions: data.sessions || [], availability: data.availability || {} };
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  // Debounced save — waits 1.5s after last change before writing
+  const scheduleSave = useCallback((newSessions, newAvailability) => {
+    latestDataRef.current = { sessions: newSessions, availability: newAvailability };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("saving");
+    saveTimerRef.current = setTimeout(() => {
+      writeBin(latestDataRef.current)
+        .then(() => setSaveStatus("saved"))
+        .catch(() => setSaveStatus("error"));
+    }, 1500);
+  }, []);
+
+  // Poll for remote changes every 12 seconds
+  useEffect(() => {
+    if (!loaded) return;
+    const interval = setInterval(() => {
+      readBin().then(data => {
+        setSessions(prev => {
+          const incoming = data.sessions || [];
+          return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+        });
+        setAvailability(prev => {
+          const incoming = data.availability || {};
+          return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+        });
+      }).catch(() => {});
+    }, 12000);
+    return () => clearInterval(interval);
+  }, [loaded]);
+
+  function updateSessions(fn) {
+    setSessions(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      scheduleSave(next, latestDataRef.current.availability);
+      return next;
+    });
+  }
+
+  function updateAvailability(fn) {
+    setAvailability(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      scheduleSave(latestDataRef.current.sessions, next);
+      return next;
+    });
+  }
+
+  function addSession() {
+    const toAdd = [];
+    if (newSession.type === "screening") {
+      toAdd.push({ id: generateId(), type: "screening", date: newSession.date || null, time: newSession.time || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [], confirmedStaff: [] });
+    } else {
+      const eveningId = generateId(), morningId = generateId();
+      const { date: mDate, time: mTime } = calcMorningFromEvening(newSession.eveningDate, newSession.eveningTime);
+      toAdd.push({ id: eveningId, type: "evening", date: newSession.eveningDate || null, time: newSession.eveningTime || null, participantId: newSession.participantId || null, notes: newSession.notes, linkedIds: [morningId], confirmedStaff: [] });
+      toAdd.push({ id: morningId, type: "morning", date: mDate || null, time: mTime || null, participantId: newSession.participantId || null, notes: "", linkedIds: [eveningId], confirmedStaff: [] });
+    }
+    updateSessions(prev => [...prev, ...toAdd]);
+    setNewSession({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
+    setShowNewNotes(false);
+    setShowAdd(false);
+  }
+
+  function toggleAvailability(sessionId, member) {
+    updateAvailability(prev => {
+      const key = `${sessionId}-${member}`;
+      const cur = prev[key];
+      const next = { ...prev };
+      if (cur === "available") next[key] = "unavailable";
+      else if (cur === "unavailable") delete next[key];
+      else next[key] = "available";
+      return next;
+    });
+  }
+
+  function toggleConfirm(sessionId, member) {
+    updateSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const confirmed = s.confirmedStaff || [];
+      return { ...s, confirmedStaff: confirmed.includes(member) ? confirmed.filter(m => m !== member) : [...confirmed, member] };
+    }));
+  }
+
+  function removeSession(id) {
+    const session = sessions.find(s => s.id === id);
+    const toRemove = new Set([id, ...(session?.linkedIds || [])]);
+    updateSessions(prev => prev.filter(s => !toRemove.has(s.id)));
+    setActiveSession(null);
+    setRightView("week");
+  }
+
+  function selectSession(id) {
+    setActiveSession(id);
+    setRightView("detail");
+  }
+
+  if (!isConfigured) return <SetupScreen />;
+
+  if (!loaded) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F7F5F2" }}>
+        <div style={{ textAlign: "center", color: "#9AA0AA" }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>◑</div>
+          <div style={{ fontSize: 14 }}>Loading…</div>
+        </div>
+      </div>
+    );
+  }
+
+  const sessionsByDate = {};
+  sessions.forEach(s => {
+    if (s.date) {
+      if (!sessionsByDate[s.date]) sessionsByDate[s.date] = [];
+      sessionsByDate[s.date].push(s);
+    }
+  });
+
+  const pending = sessions.filter(s => !s.date);
+  const booked = sessions.filter(s => s.date).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
+  const selectedSession = sessions.find(s => s.id === activeSession);
+  const morningPreview = calcMorningFromEvening(newSession.eveningDate, newSession.eveningTime);
+
+  const saveLabel = saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Saved" : saveStatus === "error" ? "⚠ Save error" : "";
+  const saveLabelColor = saveStatus === "error" ? "#A03030" : saveStatus === "saved" ? "#276644" : "#9AA0AA";
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#F7F5F2", color: "#1A2130", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column" }}>
+      <style>{`
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #F7F5F2; } ::-webkit-scrollbar-thumb { background: #D0CCC6; border-radius: 2px; }
+        input, select, textarea { background: #fff; color: #1A2130; border: 1px solid #D0CCC6; border-radius: 4px; padding: 8px 12px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; outline: none; width: 100%; }
+        input:focus, select:focus, textarea:focus { border-color: #3A5FA5; }
+        .session-card { background: #fff; border: 1px solid #E4E0DA; border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: all 0.15s; }
+        .session-card:hover { border-color: #A8B8D8; background: #EEF2FA; }
+        .session-card.active { border-color: #3A5FA5; background: #EEF2FA; }
+        .btn { border: none; border-radius: 4px; cursor: pointer; font-family: Arial, Helvetica, sans-serif; font-size: 12px; padding: 8px 16px; transition: all 0.15s; }
+        .btn-primary { background: #3A5FA5; color: white; } .btn-primary:hover { background: #2E4F95; }
+        .btn-ghost { background: transparent; color: #6B7A8D; border: 1px solid #D0CCC6; } .btn-ghost:hover { color: #1A2130; border-color: #3A5FA5; }
+        .btn-danger { background: transparent; color: #A03030; border: 1px solid #A0303033; } .btn-danger:hover { background: #A0303011; }
+        .btn-icon { background: transparent; border: 1px solid #D0CCC6; color: #6B7A8D; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 14px; transition: all 0.15s; font-family: Arial, Helvetica, sans-serif; } .btn-icon:hover { border-color: #3A5FA5; color: #3A5FA5; }
+        .avail-chip { border-radius: 20px; padding: 4px 10px; font-size: 11px; cursor: pointer; transition: all 0.15s; border: 1px solid; user-select: none; font-family: Arial, Helvetica, sans-serif; }
+        .avail-available { background: #E6F4EC; border-color: #5AAA7A; color: #276644; }
+        .avail-unavailable { background: #FAE8E8; border-color: #C07070; color: #8A2020; }
+        .avail-none { background: transparent; border-color: #D0CCC6; color: #9AA0AA; } .avail-none:hover { border-color: #3A5FA5; color: #6B7A8D; }
+        .confirm-btn { border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; border: 1px solid; user-select: none; font-family: Arial, Helvetica, sans-serif; transition: all 0.15s; }
+        .confirm-btn.confirmed { background: #E6F4EC; border-color: #5AAA7A; color: #276644; font-weight: bold; }
+        .confirm-btn.unconfirmed { background: transparent; border-color: #D0CCC6; color: #9AA0AA; } .confirm-btn.unconfirmed:hover { border-color: #5AAA7A; color: #276644; }
+        label { font-size: 11px; color: #6B7A8D; letter-spacing: 0.06em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+        .section-title { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #9AA0AA; margin-bottom: 10px; font-weight: bold; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+        .modal { background: #fff; border: 1px solid #E4E0DA; border-radius: 12px; padding: 28px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+        .linked-badge { font-size: 10px; color: #6B7A8D; background: #F0EEF8; border: 1px solid #C0BCD855; border-radius: 3px; padding: 2px 6px; display: inline-block; }
+        .auto-field { background: #F0EEE8 !important; color: #9AA0AA !important; cursor: default; }
+        .cal-chip { border-radius: 3px; cursor: pointer; transition: opacity 0.1s; display: block; margin-bottom: 3px; font-family: Arial, Helvetica, sans-serif; border: none; width: 100%; text-align: left; }
+        .cal-chip:hover { opacity: 0.78; }
+        .view-tab { padding: 7px 14px; font-size: 11px; letter-spacing: 0.06em; border: none; cursor: pointer; font-family: Arial, Helvetica, sans-serif; border-bottom: 2px solid transparent; background: transparent; color: #9AA0AA; transition: all 0.15s; }
+        .view-tab.active { color: #3A5FA5; border-bottom-color: #3A5FA5; }
+        .view-tab:hover:not(.active) { color: #6B7A8D; }
+        .notes-toggle { background: none; border: none; color: #3A5FA5; font-size: 12px; cursor: pointer; padding: 0; font-family: Arial, Helvetica, sans-serif; text-decoration: underline; }
+      `}</style>
+
+      {/* Who are you? splash */}
+      {!currentUser && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(247,245,242,0.97)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", border: "1px solid #E4E0DA", borderRadius: 14, padding: "40px 44px", boxShadow: "0 8px 40px rgba(0,0,0,0.10)", textAlign: "center", maxWidth: 360, width: "100%" }}>
+            <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 6 }}>Sleep Study</div>
+            <div style={{ fontSize: 13, color: "#9AA0AA", marginBottom: 28 }}>Who are you? Tap your name to get started.</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {TEAM.map(name => (
+                <button key={name} onClick={() => setCurrentUser(name)}
+                  style={{ padding: "13px 20px", fontSize: 15, fontWeight: "600", background: "#F7F5F2", border: "1px solid #E4E0DA", borderRadius: 8, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", color: "#1A2130" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#EEF2FA"; e.currentTarget.style.borderColor = "#3A5FA5"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#F7F5F2"; e.currentTarget.style.borderColor = "#E4E0DA"; }}
+                >{name}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ borderBottom: "1px solid #E4E0DA", padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff" }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: "bold", color: "#1A2130" }}>Sleep Study</div>
+          <div style={{ fontSize: 11, color: "#9AA0AA", letterSpacing: "0.1em", marginTop: 2 }}>SESSION BOOKING SYSTEM</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {saveLabel && <span style={{ fontSize: 11, color: saveLabelColor }}>{saveLabel}</span>}
+          {currentUser && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#EEF2FA", border: "1px solid #A8B8D8", borderRadius: 20, padding: "4px 12px" }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3A5FA5" }} />
+                <span style={{ fontSize: 12, fontWeight: "600", color: "#1D58C4" }}>{currentUser}</span>
+              </div>
+              <button onClick={() => setCurrentUser(null)} style={{ fontSize: 11, color: "#9AA0AA", background: "none", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", textDecoration: "underline" }}>Switch</button>
+            </div>
+          )}
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Session</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+        {/* Left panel */}
+        <div style={{ width: 290, borderRight: "1px solid #E4E0DA", padding: "18px 12px", overflowY: "auto", flexShrink: 0, background: "#FAFAF8" }}>
+          {pending.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <div className="section-title">⟳ Pending · {pending.length}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+              </div>
+            </div>
+          )}
+          {booked.length > 0 && (
+            <div>
+              <div className="section-title">✓ Booked · {booked.length}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} />)}
+              </div>
+            </div>
+          )}
+          {sessions.length === 0 && (
+            <div style={{ textAlign: "center", color: "#C0BDB8", fontSize: 13, marginTop: 60 }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>◑</div>
+              No sessions yet.<br />Add one to get started.
+            </div>
+          )}
+        </div>
+
+        {/* Right panel */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ borderBottom: "1px solid #E4E0DA", background: "#fff", display: "flex", alignItems: "center", paddingLeft: 20, gap: 2 }}>
+            {rightView === "detail" && selectedSession && <button className="view-tab active">DETAIL</button>}
+            <button className={`view-tab ${rightView === "week" ? "active" : ""}`} onClick={() => setRightView("week")}>WEEK</button>
+            <button className={`view-tab ${rightView === "month" ? "active" : ""}`} onClick={() => setRightView("month")}>MONTH</button>
+            <button className={`view-tab ${rightView === "list" ? "active" : ""}`} onClick={() => setRightView("list")}>LIST</button>
+          </div>
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {rightView === "detail" && selectedSession ? (
+              <div style={{ padding: "24px 28px" }}>
+                <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} />
+              </div>
+            ) : rightView === "week" ? (
+              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} />
+            ) : rightView === "month" ? (
+              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} />
+            ) : (
+              <ListView sessions={sessions} team={TEAM} onSelectSession={selectSession} activeSession={activeSession} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Add session modal */}
+      {showAdd && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowAdd(false)}>
+          <div className="modal">
+            <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 18 }}>Add Session</div>
+            <div style={{ marginBottom: 14 }}>
+              <label>Session Type</label>
+              <select value={newSession.type} onChange={e => setNewSession({ ...newSession, type: e.target.value })}>
+                <option value="screening">Screening</option>
+                <option value="study">Sleep Study (Evening + Morning)</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label>Participant ID</label>
+              <input type="text" value={newSession.participantId} onChange={e => setNewSession({ ...newSession, participantId: e.target.value })} placeholder="e.g. P042" />
+            </div>
+            {newSession.type === "screening" ? (
+              <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(DD/MM, blank = TBC)</span></label><input type="text" value={newSession.date} onChange={e => setNewSession({ ...newSession, date: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+                <div><label>Time</label><input type="time" value={newSession.time} onChange={e => setNewSession({ ...newSession, time: e.target.value })} style={{ width: 130 }} /></div>
+              </div>
+            ) : (
+              <>
+                <div style={{ background: "#EEF2FA", borderRadius: 5, padding: "7px 11px", fontSize: 12, color: "#1D58C4", marginBottom: 12 }}>Morning session auto-set to 12 hours after evening.</div>
+                <div style={{ background: "#F7F5F2", borderRadius: 6, padding: 12, marginBottom: 10, border: "1px solid #E4E0DA" }}>
+                  <div style={{ fontSize: 11, color: "#1D58C4", marginBottom: 8, fontWeight: "bold" }}>◑ EVENING SESSION</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div><label>Date (DD/MM)</label><input type="text" value={newSession.eveningDate} onChange={e => setNewSession({ ...newSession, eveningDate: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+                    <div><label>Time</label><input type="time" value={newSession.eveningTime} onChange={e => setNewSession({ ...newSession, eveningTime: e.target.value })} style={{ width: 130 }} /></div>
+                  </div>
+                </div>
+                <div style={{ background: "#F7F5F2", borderRadius: 6, padding: 12, marginBottom: 14, border: "1px solid #E4E0DA" }}>
+                  <div style={{ fontSize: 11, color: "#9A7C00", marginBottom: 8, fontWeight: "bold" }}>◐ MORNING SESSION <span style={{ color: "#9AA0AA", fontWeight: "normal", fontSize: 10 }}>auto</span></div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div><label>Date</label><input className="auto-field" type="text" value={morningPreview.date} readOnly placeholder="—" style={{ width: 100 }} /></div>
+                    <div><label>Time</label><input className="auto-field" type="text" value={morningPreview.time} readOnly placeholder="—" style={{ width: 130 }} /></div>
+                  </div>
+                </div>
+              </>
+            )}
+            <div style={{ marginBottom: 18 }}>
+              <button className="notes-toggle" onClick={() => setShowNewNotes(v => !v)}>{showNewNotes ? "▾ Hide notes" : "▸ Add notes"}</button>
+              {showNewNotes && <textarea rows={3} value={newSession.notes} onChange={e => setNewSession({ ...newSession, notes: e.target.value })} placeholder="Any additional notes..." style={{ resize: "vertical", marginTop: 8 }} />}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost" onClick={() => { setShowAdd(false); setShowNewNotes(false); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={addSession}>Add Session{newSession.type === "study" ? "s" : ""}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ session, size = 14 }) {
+  if (!session.date) return null;
+  const ok = isFullyConfirmed(session);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size + 4, height: size + 4, borderRadius: "50%", background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: size - 3, fontWeight: "bold", flexShrink: 0, border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}` }}>
+      {ok ? "✓" : "?"}
+    </span>
+  );
+}
+
+// ─── Session Card ─────────────────────────────────────────────────────────────
+
+function SessionCard({ session, active, onClick }) {
+  const type = SESSION_TYPES[session.type];
+  const confirmed = (session.confirmedStaff || []).length;
+  const required = type.required;
+  return (
+    <div className={`session-card ${active ? "active" : ""}`} onClick={onClick}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: type.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: type.textColor, fontWeight: "bold" }}>{type.label}</span>
+            {session.linkedIds?.length > 0 && <span className="linked-badge">linked</span>}
+          </div>
+          {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
+          {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDate(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
+          {session.notes && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+          <StatusBadge session={session} />
+          {session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Session Detail ───────────────────────────────────────────────────────────
+
+function SessionDetail({ session, sessions, updateSessions, team, availability, toggleAvailability, toggleConfirm, removeSession }) {
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
+  const [showEditNotes, setShowEditNotes] = useState(!!session.notes);
+  const type = SESSION_TYPES[session.type];
+  const required = type.required;
+  const confirmed = session.confirmedStaff || [];
+
+  useEffect(() => {
+    setEditData({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
+    setShowEditNotes(!!session.notes);
+    setEditing(false);
+  }, [session.id]);
+
+  const editMorningPreview = calcMorningFromEvening(editData.date, editData.time);
+
+  function saveEdit() {
+    updateSessions(prev => prev.map(s => {
+      if (s.id === session.id) return { ...s, date: editData.date || null, time: editData.time || null, participantId: editData.participantId || null, notes: editData.notes };
+      if (session.type === "evening" && session.linkedIds?.includes(s.id) && s.type === "morning") {
+        const { date: mDate, time: mTime } = calcMorningFromEvening(editData.date, editData.time);
+        return { ...s, date: mDate || null, time: mTime || null, participantId: editData.participantId || null };
+      }
+      return s;
+    }));
+    setEditing(false);
+  }
+
+  const linkedSessions = session.linkedIds?.map(id => sessions.find(s => s.id === id)).filter(Boolean) || [];
+
+  return (
+    <div style={{ maxWidth: 540 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 3, background: type.color }} />
+            <span style={{ fontSize: 18, fontWeight: "bold", color: "#1A2130" }}>{type.label}</span>
+            <StatusBadge session={session} size={16} />
+          </div>
+          {session.participantId && !editing && <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
+          {!editing && <div style={{ fontSize: 13, color: "#6B7A8D" }}>{session.date ? formatDate(session.date, session.time) : <span style={{ fontStyle: "italic", color: "#9AA0AA" }}>Date not yet set</span>}</div>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {session.type !== "morning" && <button className="btn btn-ghost" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit"}</button>}
+          <button className="btn btn-danger" onClick={() => removeSession(session.id)}>{session.linkedIds?.length > 0 ? "Remove Pair" : "Remove"}</button>
+        </div>
+      </div>
+
+      {editing && (
+        <div style={{ background: "#F7F5F2", borderRadius: 8, padding: 16, marginBottom: 20, border: "1px solid #E4E0DA" }}>
+          <div style={{ marginBottom: 12 }}><label>Participant ID</label><input type="text" value={editData.participantId} onChange={e => setEditData({ ...editData, participantId: e.target.value })} placeholder="e.g. P042" /></div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div><label>Date (DD/MM)</label><input type="text" value={editData.date} onChange={e => setEditData({ ...editData, date: e.target.value })} placeholder="DD/MM" maxLength={5} style={{ width: 100 }} /></div>
+            <div><label>Time</label><input type="time" value={editData.time} onChange={e => setEditData({ ...editData, time: e.target.value })} style={{ width: 130 }} /></div>
+          </div>
+          {session.type === "evening" && editMorningPreview.date && (
+            <div style={{ fontSize: 12, color: "#7A5800", marginBottom: 12, background: "#FEF9C3", padding: "6px 10px", borderRadius: 4 }}>◐ Morning will update to {formatDate(editMorningPreview.date, editMorningPreview.time)}</div>
+          )}
+          <div style={{ marginBottom: 12 }}>
+            <button className="notes-toggle" onClick={() => setShowEditNotes(v => !v)} style={{ marginBottom: 6 }}>{showEditNotes ? "▾ Hide notes" : "▸ Add notes"}</button>
+            {showEditNotes && <textarea rows={2} value={editData.notes} onChange={e => setEditData({ ...editData, notes: e.target.value })} style={{ resize: "vertical", marginTop: 4 }} />}
+          </div>
+          <button className="btn btn-primary" onClick={saveEdit}>Save</button>
+        </div>
+      )}
+
+      {session.notes && !editing && <div style={{ color: "#6B7A8D", fontSize: 13, marginBottom: 18, padding: "10px 14px", background: "#F7F5F2", borderRadius: 6, borderLeft: `3px solid ${type.color}` }}>{session.notes}</div>}
+      {session.type === "morning" && <div style={{ fontSize: 12, color: "#9AA0AA", marginBottom: 16, fontStyle: "italic" }}>This session is auto-managed — edit via the linked Evening Study.</div>}
+
+      {linkedSessions.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="section-title">Linked Session</div>
+          {linkedSessions.map(ls => {
+            const lt = SESSION_TYPES[ls.type];
+            return (
+              <div key={ls.id} style={{ background: "#F7F5F2", borderRadius: 6, padding: 10, display: "flex", alignItems: "center", gap: 10, border: "1px solid #E4E0DA" }}>
+                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: lt.color }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: lt.textColor, fontWeight: "bold" }}>{lt.label}</div>
+                  <div style={{ fontSize: 11, color: "#6B7A8D" }}>{ls.date ? formatDate(ls.date, ls.time) : <span style={{ fontStyle: "italic", color: "#9AA0AA" }}>Date TBC</span>}</div>
+                </div>
+                <StatusBadge session={ls} size={13} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div className="section-title" style={{ marginBottom: 0 }}>Confirm Staff</div>
+          <span style={{ fontSize: 11, color: confirmed.length >= required ? "#276644" : "#9AA0AA" }}>{confirmed.length}/{required} confirmed</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {team.map(member => {
+            const isConfirmed = confirmed.includes(member);
+            const avail = availability[`${session.id}-${member}`];
+            return (
+              <div key={member} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: isConfirmed ? "#F0FDF4" : "#fff", borderRadius: 6, border: `1px solid ${isConfirmed ? "#6EE7B7" : "#E4E0DA"}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: isConfirmed ? "600" : "normal", color: "#1A2130" }}>{member}</div>
+                  {avail === "available" && !isConfirmed && <span style={{ fontSize: 10, color: "#276644", background: "#E6F4EC", border: "1px solid #5AAA7A55", borderRadius: 10, padding: "1px 7px" }}>available</span>}
+                  {avail === "unavailable" && !isConfirmed && <span style={{ fontSize: 10, color: "#8A2020", background: "#FAE8E8", border: "1px solid #C0707055", borderRadius: 10, padding: "1px 7px" }}>unavailable</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <button className={`avail-chip ${avail === "available" ? "avail-available" : avail === "unavailable" ? "avail-unavailable" : "avail-none"}`} onClick={() => toggleAvailability(session.id, member)}>
+                    {avail === "available" ? "✓ Avail" : avail === "unavailable" ? "✕ Unavail" : "Avail?"}
+                  </button>
+                  <button className={`confirm-btn ${isConfirmed ? "confirmed" : "unconfirmed"}`} onClick={() => toggleConfirm(session.id, member)}>
+                    {isConfirmed ? "✓ Confirmed" : "Confirm"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {confirmed.length > 0 && (
+          <div style={{ marginTop: 10, padding: "8px 12px", background: "#F0FDF4", borderRadius: 6, border: "1px solid #6EE7B755" }}>
+            <div style={{ fontSize: 11, color: "#065F46", fontWeight: "bold", marginBottom: 4 }}>CONFIRMED STAFF</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {confirmed.map(m => <span key={m} style={{ fontSize: 12, color: "#065F46", background: "#D1FAE5", border: "1px solid #6EE7B7", borderRadius: 4, padding: "2px 8px" }}>{m}</span>)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Calendar Chip ────────────────────────────────────────────────────────────
+
+function CalChip({ session, onClick, compact = false }) {
+  const t = SESSION_TYPES[session.type];
+  const ok = isFullyConfirmed(session);
+  const typeShort = session.type === "screening" ? "Screening" : session.type === "evening" ? "Evening" : "Morning";
+  return (
+    <button className="cal-chip" onClick={onClick}
+      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "3px 5px" : "4px 6px" }}
+      title={`${t.label}${session.participantId ? " — " + session.participantId : ""}${session.time ? " · " + session.time : ""}`}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "space-between" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: "bold", fontSize: 10, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
+          </div>
+          {session.time && !compact && <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.2 }}>{session.time}</div>}
+          {compact && session.time && <span style={{ fontSize: 10, opacity: 0.7 }}> {session.time}</span>}
+        </div>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", flexShrink: 0, background: ok ? "#D1FAE5" : "#FEE2E2", color: ok ? "#065F46" : "#991B1B", fontSize: 8, fontWeight: "bold", border: `1px solid ${ok ? "#6EE7B7" : "#FCA5A5"}` }}>
+          {ok ? "✓" : "?"}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ─── Legend ───────────────────────────────────────────────────────────────────
+
+function Legend() {
+  return (
+    <div style={{ display: "flex", gap: 16, marginTop: 12, paddingTop: 10, borderTop: "1px solid #E4E0DA", flexWrap: "wrap", alignItems: "center" }}>
+      {Object.entries(SESSION_TYPES).map(([k, t]) => (
+        <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B7A8D" }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: t.color }} /> {t.label}
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 8, borderLeft: "1px solid #E4E0DA", paddingLeft: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6B7A8D" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#D1FAE5", color: "#065F46", fontSize: 8, fontWeight: "bold", border: "1px solid #6EE7B7" }}>✓</span> Fully confirmed
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6B7A8D" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "#FEE2E2", color: "#991B1B", fontSize: 8, fontWeight: "bold", border: "1px solid #FCA5A5" }}>?</span> Needs staff
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Week View ────────────────────────────────────────────────────────────────
+
+function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession }) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  const fmtH = d => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const weekLabel = `${fmtH(weekStart)} – ${fmtH(addDays(weekStart, 4))}, ${weekStart.getFullYear()}`;
+  return (
+    <div style={{ padding: "20px", height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{weekLabel}</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, -7))}>‹</button>
+          <button className="btn-icon" onClick={() => setWeekStart(getMonday(today))}>Today</button>
+          <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, 7))}>›</button>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, flex: 1 }}>
+        {days.map((day, i) => {
+          const key = dateToKey(day);
+          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+          const isToday = isSameDay(day, today);
+          return (
+            <div key={key} style={{ background: isToday ? "#F0F4FF" : "#fff", border: `1px solid ${isToday ? "#A8B8D8" : "#E4E0DA"}`, borderRadius: 8, padding: "10px 8px", display: "flex", flexDirection: "column", minHeight: 160 }}>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10, color: "#9AA0AA", textTransform: "uppercase", letterSpacing: "0.06em" }}>{DAY_SHORT[i]}</div>
+                <div style={{ fontSize: 20, fontWeight: "700", color: isToday ? "#3A5FA5" : "#1A2130", lineHeight: 1.1 }}>{day.getDate()}</div>
+                <div style={{ fontSize: 10, color: "#C0BDB8" }}>{day.toLocaleDateString("en-GB",{month:"short"})}</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                {daySessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} />)}
+              </div>
+              {daySessions.length === 0 && <div style={{ fontSize: 10, color: "#E0DDD9", textAlign: "center", marginTop: "auto" }}>—</div>}
+            </div>
+          );
+        })}
+      </div>
+      <Legend />
+    </div>
+  );
+}
+
+// ─── Month View ───────────────────────────────────────────────────────────────
+
+function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession }) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startMonday = getMonday(firstDay);
+  const endFriday = (() => {
+    const d = new Date(lastDay);
+    const dow = d.getDay();
+    if (dow === 0) d.setDate(d.getDate() - 2);
+    else if (dow === 6) d.setDate(d.getDate() - 1);
+    else d.setDate(d.getDate() + (5 - dow));
+    return d;
+  })();
+  const weekdays = [];
+  const cursor = new Date(startMonday);
+  while (cursor <= endFriday) {
+    const dow = cursor.getDay();
+    if (dow >= 1 && dow <= 5) weekdays.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return (
+    <div style={{ padding: "20px", display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{MONTH_NAMES[month]} {year}</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 0 ? {year:y-1,month:11} : {year:y,month:m-1})}>‹</button>
+          <button className="btn-icon" onClick={() => { const n=new Date(); setMonth({year:n.getFullYear(),month:n.getMonth()}); }}>Today</button>
+          <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 11 ? {year:y+1,month:0} : {year:y,month:m+1})}>›</button>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", borderTop: "1px solid #E4E0DA", borderLeft: "1px solid #E4E0DA" }}>
+        {DAY_SHORT.map(d => <div key={d} style={{ padding: "5px 6px", fontSize: 10, color: "#9AA0AA", textAlign: "center", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: "#FAFAF8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", borderLeft: "1px solid #E4E0DA", flex: 1 }}>
+        {weekdays.map(day => {
+          const key = dateToKey(day);
+          const inMonth = day.getMonth() === month;
+          const isToday = isSameDay(day, today);
+          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
+          return (
+            <div key={key} style={{ minHeight: 80, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : !inMonth ? "#FAFAF8" : "#fff" }}>
+              <div style={{ fontSize: 12, fontWeight: isToday ? "700" : "400", color: isToday ? "#3A5FA5" : !inMonth ? "#C0BDB8" : "#1A2130", marginBottom: 3 }}>
+                {isToday ? <span style={{ background: "#3A5FA5", color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>{day.getDate()}</span> : day.getDate()}
+              </div>
+              {daySessions.slice(0,3).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact />)}
+              {daySessions.length > 3 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{daySessions.length - 3} more</div>}
+            </div>
+          );
+        })}
+      </div>
+      <Legend />
+    </div>
+  );
+}
+
+// ─── List View ────────────────────────────────────────────────────────────────
+
+function ListView({ sessions, team, onSelectSession, activeSession }) {
+  const [filterMember, setFilterMember] = useState("all");
+  const booked = sessions.filter(s => s.date).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
+  const filtered = filterMember === "all" ? booked : booked.filter(s => (s.confirmedStaff || []).includes(filterMember));
+  const grouped = {};
+  filtered.forEach(s => { if (!grouped[s.date]) grouped[s.date] = []; grouped[s.date].push(s); });
+  const dateKeys = Object.keys(grouped).sort();
+
+  function formatGroupDate(ddmm) {
+    if (!ddmm) return "";
+    const [d, mo] = ddmm.split("/");
+    const dt = new Date(`2026-${mo}-${d}T00:00:00`);
+    return isNaN(dt) ? ddmm : dt.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  return (
+    <div style={{ padding: "20px 24px", height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: "#6B7A8D", fontWeight: "600", marginRight: 4 }}>Filter by:</span>
+        {["all", ...team].map(m => (
+          <button key={m} onClick={() => setFilterMember(m)}
+            style={{ border: "1px solid", borderRadius: 20, padding: "4px 14px", fontSize: 12, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", transition: "all 0.15s", background: filterMember === m ? "#1D58C4" : "#fff", color: filterMember === m ? "#fff" : "#6B7A8D", borderColor: filterMember === m ? "#1D58C4" : "#D0CCC6", fontWeight: filterMember === m ? "600" : "normal" }}
+          >{m === "all" ? "All sessions" : m}</button>
+        ))}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {dateKeys.length === 0 ? (
+          <div style={{ textAlign: "center", color: "#C0BDB8", fontSize: 13, marginTop: 60 }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>◈</div>
+            {filterMember === "all" ? "No booked sessions yet." : `No confirmed sessions for ${filterMember}.`}
+          </div>
+        ) : dateKeys.map(dateKey => (
+          <div key={dateKey} style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: "700", color: "#9AA0AA", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #E4E0DA" }}>
+              {formatGroupDate(dateKey)} <span style={{ fontWeight: "400", color: "#C0BDB8" }}>· {dateKey}/2026</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {grouped[dateKey].map(s => {
+                const t = SESSION_TYPES[s.type];
+                const isActive = s.id === activeSession;
+                return (
+                  <div key={s.id} onClick={() => onSelectSession(s.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 7, cursor: "pointer", background: isActive ? "#EEF2FA" : "#fff", border: `1px solid ${isActive ? "#3A5FA5" : "#E4E0DA"}`, transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "#F7F8FF"; e.currentTarget.style.borderColor = "#A8B8D8"; }}}
+                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E4E0DA"; }}}
+                  >
+                    <div style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: t.color, flexShrink: 0 }} />
+                    <div style={{ width: 44, flexShrink: 0, textAlign: "right" }}><span style={{ fontSize: 12, fontWeight: "600", color: "#6B7A8D" }}>{s.time || "—"}</span></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 12, fontWeight: "700", color: t.textColor }}>{t.label}</span>
+                        {s.participantId && <span style={{ fontSize: 12, color: "#1A2130", fontWeight: "600" }}>· {s.participantId}</span>}
+                        {s.linkedIds?.length > 0 && <span style={{ fontSize: 10, color: "#6B7A8D", background: "#F0EEF8", border: "1px solid #C0BCD855", borderRadius: 3, padding: "1px 5px" }}>linked</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {(s.confirmedStaff || []).length > 0
+                          ? s.confirmedStaff.map(m => <span key={m} style={{ fontSize: 10, color: "#065F46", background: "#D1FAE5", border: "1px solid #6EE7B755", borderRadius: 3, padding: "1px 6px" }}>{m}</span>)
+                          : <span style={{ fontSize: 10, color: "#9AA0AA", fontStyle: "italic" }}>No staff confirmed</span>}
+                      </div>
+                    </div>
+                    <StatusBadge session={s} size={16} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Mount ────────────────────────────────────────────────────────────────────
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
