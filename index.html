@@ -291,6 +291,7 @@ function App() {
   const [showAvailCal, setShowAvailCal] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
   const [rightView, setRightView] = useState("week");
+  const [sidebarView, setSidebarView] = useState("date"); // "date" | "status"
   const [calWeekStart, setCalWeekStart] = useState(() => getMonday(new Date()));
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
   const [newSession, setNewSession] = useState({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
@@ -473,6 +474,23 @@ function App() {
   const pending = sessions.filter(s => !s.date);
   const booked = sessions.filter(s => s.date).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
   const selectedSession = sessions.find(s => s.id === activeSession);
+
+  // Status view groups
+  const allSorted = sessions.slice().sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time));
+  });
+  const statusNeedsConfirm = allSorted.filter(s => !isFullyConfirmed(s));
+  const statusConfirmed = allSorted.filter(s => isFullyConfirmed(s) && !s.calendarAdded);
+  const statusInOutlook = allSorted.filter(s => s.calendarAdded);
+  // Sort statusNeedsConfirm: sessions with at least one "available" person first
+  statusNeedsConfirm.sort((a, b) => {
+    const aHas = TEAM.some(m => (availability || {})[`${a.id}-${m}`] === "available") ? 1 : 0;
+    const bHas = TEAM.some(m => (availability || {})[`${b.id}-${m}`] === "available") ? 1 : 0;
+    return bHas - aHas;
+  });
   const morningPreview = calcMorningFromEvening(newSession.eveningDate, newSession.eveningTime);
 
   const saveLabel = saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Saved" : saveStatus === "error" ? "⚠ Save error" : "";
@@ -580,29 +598,74 @@ function App() {
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
         {/* Left panel */}
-        <div style={{ width: 290, borderRight: "1px solid #E4E0DA", padding: "18px 12px", overflowY: "auto", flexShrink: 0, background: "#FAFAF8" }}>
-          {pending.length > 0 && (
-            <div style={{ marginBottom: 22 }}>
-              <div className="section-title">⟳ Pending · {pending.length}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+        <div style={{ width: 290, borderRight: "1px solid #E4E0DA", display: "flex", flexDirection: "column", flexShrink: 0, background: "#FAFAF8" }}>
+          {/* Sidebar view toggle */}
+          <div style={{ display: "flex", borderBottom: "1px solid #E4E0DA", background: "#fff", flexShrink: 0 }}>
+            <button
+              onClick={() => setSidebarView("date")}
+              style={{ flex: 1, padding: "9px 0", fontSize: 10, fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", background: "transparent", color: sidebarView === "date" ? "#3A5FA5" : "#9AA0AA", borderBottom: `2px solid ${sidebarView === "date" ? "#3A5FA5" : "transparent"}`, transition: "all 0.15s" }}
+            >By Date</button>
+            <button
+              onClick={() => setSidebarView("status")}
+              style={{ flex: 1, padding: "9px 0", fontSize: 10, fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", border: "none", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", background: "transparent", color: sidebarView === "status" ? "#3A5FA5" : "#9AA0AA", borderBottom: `2px solid ${sidebarView === "status" ? "#3A5FA5" : "transparent"}`, transition: "all 0.15s" }}
+            >By Status</button>
+          </div>
+          <div style={{ padding: "14px 12px", overflowY: "auto", flex: 1 }}>
+            {sessions.length === 0 && (
+              <div style={{ textAlign: "center", color: "#C0BDB8", fontSize: 13, marginTop: 60 }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>◑</div>
+                No sessions yet.<br />Add one to get started.
               </div>
-            </div>
-          )}
-          {booked.length > 0 && (
-            <div>
-              <div className="section-title">✓ Booked · {booked.length}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
-              </div>
-            </div>
-          )}
-          {sessions.length === 0 && (
-            <div style={{ textAlign: "center", color: "#C0BDB8", fontSize: 13, marginTop: 60 }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>◑</div>
-              No sessions yet.<br />Add one to get started.
-            </div>
-          )}
+            )}
+            {sidebarView === "date" && sessions.length > 0 && (
+              <>
+                {pending.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <div className="section-title">⟳ Pending · {pending.length}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {pending.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                    </div>
+                  </div>
+                )}
+                {booked.length > 0 && (
+                  <div>
+                    <div className="section-title">✓ Booked · {booked.length}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {sidebarView === "status" && sessions.length > 0 && (
+              <>
+                {statusNeedsConfirm.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <div className="section-title" style={{ color: "#991B1B" }}>⏳ Available / Needs Confirmation · {statusNeedsConfirm.length}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {statusNeedsConfirm.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                    </div>
+                  </div>
+                )}
+                {statusConfirmed.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <div className="section-title" style={{ color: "#065F46" }}>✓ Staff Confirmed · {statusConfirmed.length}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {statusConfirmed.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                    </div>
+                  </div>
+                )}
+                {statusInOutlook.length > 0 && (
+                  <div>
+                    <div className="section-title" style={{ color: "#0F766E" }}>◉ In Outlook · {statusInOutlook.length}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {statusInOutlook.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Right panel */}
@@ -762,6 +825,8 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
   const [showEditNotes, setShowEditNotes] = useState(!!session.notes);
+  const [morningOverride, setMorningOverride] = useState(false);
+  const [overrideData, setOverrideData] = useState({ date: session.date || "", time: session.time || "" });
   const type = SESSION_TYPES[session.type];
   const required = type.required;
   const confirmed = session.confirmedStaff || [];
@@ -770,6 +835,8 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
     setEditData({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
     setShowEditNotes(!!session.notes);
     setEditing(false);
+    setMorningOverride(false);
+    setOverrideData({ date: session.date || "", time: session.time || "" });
   }, [session.id]);
 
   const editMorningPreview = calcMorningFromEvening(editData.date, editData.time);
@@ -777,9 +844,12 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
   function saveEdit() {
     updateSessions(prev => prev.map(s => {
       if (s.id === session.id) return { ...s, date: editData.date || null, time: editData.time || null, participantId: editData.participantId || null, notes: editData.notes };
-      if (session.type === "evening" && session.linkedIds?.includes(s.id) && s.type === "morning") {
+      if (session.type === "evening" && session.linkedIds?.includes(s.id) && s.type === "morning" && !s.manualMorningTime) {
         const { date: mDate, time: mTime } = calcMorningFromEvening(editData.date, editData.time);
         return { ...s, date: mDate || null, time: mTime || null, participantId: editData.participantId || null };
+      }
+      if (session.type === "evening" && session.linkedIds?.includes(s.id) && s.type === "morning" && s.manualMorningTime) {
+        return { ...s, participantId: editData.participantId || null };
       }
       return s;
     }));
@@ -787,6 +857,8 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
   }
 
   const linkedSessions = session.linkedIds?.map(id => sessions.find(s => s.id === id)).filter(Boolean) || [];
+  const linkedMorning = session.type === "evening" ? linkedSessions.find(s => s.type === "morning") : null;
+  const linkedEvening = session.type === "morning" ? linkedSessions.find(s => s.type === "evening") : null;
 
   return (
     <div style={{ maxWidth: 540 }}>
@@ -813,8 +885,11 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
             <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(DD/MM)</span></label><DatePicker value={editData.date} onChange={v => setEditData({ ...editData, date: v })} /></div>
             <div><label>Time</label><input type="time" value={editData.time} onChange={e => setEditData({ ...editData, time: e.target.value })} style={{ width: 130 }} /></div>
           </div>
-          {session.type === "evening" && editMorningPreview.date && (
+          {session.type === "evening" && editMorningPreview.date && !linkedMorning?.manualMorningTime && (
             <div style={{ fontSize: 12, color: "#7A5800", marginBottom: 12, background: "#FEF9C3", padding: "6px 10px", borderRadius: 4 }}>◐ Morning will update to {formatDate(editMorningPreview.date, editMorningPreview.time)}</div>
+          )}
+          {session.type === "evening" && linkedMorning?.manualMorningTime && (
+            <div style={{ fontSize: 12, color: "#854D0E", marginBottom: 12, background: "#FEF3C7", padding: "6px 10px", borderRadius: 4, border: "1px solid #FCD34D" }}>⚠ Morning time is manually overridden — it will not be changed</div>
           )}
           <div style={{ marginBottom: 12 }}>
             <button className="notes-toggle" onClick={() => setShowEditNotes(v => !v)} style={{ marginBottom: 6 }}>{showEditNotes ? "▾ Hide notes" : "▸ Add notes"}</button>
@@ -825,7 +900,45 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
       )}
 
       {session.notes && !editing && <div style={{ color: "#6B7A8D", fontSize: 13, marginBottom: 18, padding: "10px 14px", background: "#F7F5F2", borderRadius: 6, borderLeft: `3px solid ${type.color}` }}>{session.notes}</div>}
-      {session.type === "morning" && <div style={{ fontSize: 12, color: "#9AA0AA", marginBottom: 16, fontStyle: "italic" }}>This session is auto-managed — edit via the linked Evening Study.</div>}
+      {session.type === "morning" && !morningOverride && (
+        <div style={{ marginBottom: 16, borderRadius: 8, border: "1px solid #E4E0DA", background: "#F7F5F2", padding: "12px 14px" }}>
+          {session.manualMorningTime ? (
+            <div>
+              <div style={{ fontSize: 12, color: "#854D0E", fontWeight: "600", marginBottom: 6 }}>⚠ Time manually overridden</div>
+              <div style={{ fontSize: 12, color: "#6B7A8D", marginBottom: 10 }}>This morning session is using a custom time instead of the auto-calculated time.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px" }} onClick={() => { setOverrideData({ date: session.date || "", time: session.time || "" }); setMorningOverride(true); }}>Edit Override</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px" }} onClick={() => {
+                  if (!linkedEvening) return;
+                  const { date: mDate, time: mTime } = calcMorningFromEvening(linkedEvening.date, linkedEvening.time);
+                  updateSessions(prev => prev.map(s => s.id !== session.id ? s : { ...s, date: mDate || null, time: mTime || null, manualMorningTime: false }));
+                }}>Reset to Auto (+12hrs)</button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: "#9AA0AA", fontStyle: "italic", marginBottom: 8 }}>Time is auto-set to 12 hours after the Evening Study.</div>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px" }} onClick={() => { setOverrideData({ date: session.date || "", time: session.time || "" }); setMorningOverride(true); }}>Override Time Manually</button>
+            </div>
+          )}
+        </div>
+      )}
+      {session.type === "morning" && morningOverride && (
+        <div style={{ background: "#F7F5F2", borderRadius: 8, padding: 16, marginBottom: 16, border: "1px solid #E4E0DA" }}>
+          <div style={{ fontSize: 12, fontWeight: "600", color: "#1A2130", marginBottom: 10 }}>Override Morning Session Time</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <div><label>Date <span style={{ color: "#9AA0AA", textTransform: "none", letterSpacing: 0, fontSize: 10 }}>(DD/MM)</span></label><DatePicker value={overrideData.date} onChange={v => setOverrideData({ ...overrideData, date: v })} /></div>
+            <div><label>Time</label><input type="time" value={overrideData.time} onChange={e => setOverrideData({ ...overrideData, time: e.target.value })} style={{ width: 130 }} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary" onClick={() => {
+              updateSessions(prev => prev.map(s => s.id !== session.id ? s : { ...s, date: overrideData.date || null, time: overrideData.time || null, manualMorningTime: true }));
+              setMorningOverride(false);
+            }}>Save Override</button>
+            <button className="btn btn-ghost" onClick={() => setMorningOverride(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {linkedSessions.length > 0 && (
         <div style={{ marginBottom: 20 }}>
