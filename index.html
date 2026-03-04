@@ -1020,6 +1020,7 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
   const availMembers = availability
     ? TEAM.filter(m => availability[`${session.id}-${m}`] === "available")
     : [];
+  const confirmedMembers = session.calendarAdded ? (session.confirmedStaff || []) : [];
   return (
     <button className="cal-chip" onClick={onClick}
       style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "5px 6px" : "4px 6px" }}
@@ -1031,10 +1032,20 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
             {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
           </div>
           {session.time && <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{formatTime12(session.time)}</div>}
+          {confirmedMembers.length > 0 && (
+            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2, alignItems: "center" }}>
+              <span style={{ fontSize: 7, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>conf:</span>
+              {confirmedMembers.map(m => (
+                <span key={m} style={{ fontSize: 8, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 3px", lineHeight: "1.6" }}>
+                  {MEMBER_ABBR[m]}
+                </span>
+              ))}
+            </div>
+          )}
           {availMembers.length > 0 && (
             <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2 }}>
               {availMembers.map(m => (
-                <span key={m} style={{ fontSize: 8, fontWeight: "700", color: "#065F46", background: "#D1FAE5", borderRadius: 2, padding: "0 3px", lineHeight: "1.6" }}>
+                <span key={m} style={{ fontSize: 8, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontStyle: "italic" }}>
                   {MEMBER_ABBR[m]}
                 </span>
               ))}
