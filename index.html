@@ -26,7 +26,6 @@ const JSONBIN_BIN_ID   = "69a52dddae596e708f56ec5a";    // e.g. 664abc123def...
 const { useState, useEffect, useRef, useCallback } = React;
 
 const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
-const MEMBER_ABBR = { Freida: "Fr", Alex: "Al", Mackenzie: "Mc", Brittany: "Br", Maddie: "Ma" };
 
 const SESSION_TYPES = {
   screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
@@ -1020,41 +1019,42 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
   const availMembers = availability
     ? TEAM.filter(m => availability[`${session.id}-${m}`] === "available")
     : [];
-  const confirmedMembers = session.calendarAdded ? (session.confirmedStaff || []) : [];
+  const confirmedMembers = session.confirmedStaff || [];
   return (
     <button className="cal-chip" onClick={onClick}
-      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "5px 6px" : "4px 6px" }}
+      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "7px 8px" : "6px 8px" }}
       title={`${t.label}${session.participantId ? " — " + session.participantId : ""}${session.time ? " · " + session.time : ""}`}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 4, justifyContent: "space-between" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: "bold", fontSize: 10, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontWeight: "bold", fontSize: 11, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
           </div>
-          {session.time && <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{formatTime12(session.time)}</div>}
+          {session.time && <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.3 }}>{formatTime12(session.time)}</div>}
           {confirmedMembers.length > 0 && (
-            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2, alignItems: "center" }}>
-              <span style={{ fontSize: 7, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>conf:</span>
+            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3, alignItems: "center" }}>
+              <span style={{ fontSize: 8, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>
+                {session.calendarAdded ? "added to O.L" : "confirmed:"}
+              </span>
               {confirmedMembers.map(m => (
-                <span key={m} style={{ fontSize: 8, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 3px", lineHeight: "1.6" }}>
-                  {MEMBER_ABBR[m]}
+                <span key={m} style={{ fontSize: 9, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
+                  {m}
                 </span>
               ))}
             </div>
           )}
           {availMembers.length > 0 && (
-            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2 }}>
+            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3 }}>
               {availMembers.map(m => (
-                <span key={m} style={{ fontSize: 8, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontStyle: "italic" }}>
-                  {MEMBER_ABBR[m]}
+                <span key={m} style={{ fontSize: 9, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 4px", lineHeight: "1.6", fontStyle: "italic" }}>
+                  {m}
                 </span>
               ))}
             </div>
           )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-          <StatusBadge session={session} size={12} />
-          {isLockedIn(session) && <span style={{ fontSize: 7, color: "#0F766E", background: "#CCFBF1", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontWeight: "700" }}>OL</span>}
+          <StatusBadge session={session} size={13} />
         </div>
       </div>
     </button>
