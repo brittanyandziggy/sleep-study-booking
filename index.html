@@ -432,6 +432,13 @@ function App() {
     setRightView("week");
   }
 
+  function cancelSession(id) {
+    const session = sessions.find(s => s.id === id);
+    const toToggle = new Set([id, ...(session?.linkedIds || [])]);
+    const cancelling = !session?.cancelled;
+    updateSessions(prev => prev.map(s => toToggle.has(s.id) ? { ...s, cancelled: cancelling } : s));
+  }
+
   function selectSession(id) {
     setActiveSession(id);
     setRightView("detail");
@@ -664,7 +671,7 @@ function App() {
           <div style={{ flex: 1, overflow: "auto" }}>
             {rightView === "detail" && selectedSession ? (
               <div style={{ padding: "24px 28px" }}>
-                <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} toggleCalendarAdded={toggleCalendarAdded} />
+                <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} toggleCalendarAdded={toggleCalendarAdded} cancelSession={cancelSession} />
               </div>
             ) : rightView === "week" ? (
               <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
@@ -748,6 +755,14 @@ function App() {
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ session, size = 14 }) {
+  if (!session.date && !session.cancelled) return null;
+  if (session.cancelled) {
+    return (
+      <span title="Cancelled" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size + 4, height: size + 4, borderRadius: "50%", background: "#F3F4F6", color: "#6B7280", fontSize: size - 3, fontWeight: "bold", flexShrink: 0, border: "1px solid #D1D5DB" }}>
+        ✕
+      </span>
+    );
+  }
   if (!session.date) return null;
   const ok = isFullyConfirmed(session);
   const locked = isLockedIn(session);
@@ -770,25 +785,27 @@ function SessionCard({ session, active, onClick, currentUser, availability, togg
   const required = type.required;
   const myAvail = currentUser ? (availability || {})[`${session.id}-${currentUser}`] : null;
   return (
-    <div className={`session-card ${active ? "active" : ""}`} onClick={onClick}>
+    <div className={`session-card ${active ? "active" : ""}`} onClick={onClick}
+      style={session.cancelled ? { opacity: 0.55, background: "#F9F9F9" } : {}}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3, flexWrap: "wrap" }}>
-            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: type.color, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: type.textColor, fontWeight: "bold" }}>{type.label}</span>
-            {session.linkedIds?.length > 0 && <span className="linked-badge">linked</span>}
+            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: session.cancelled ? "#9CA3AF" : type.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: session.cancelled ? "#6B7280" : type.textColor, fontWeight: "bold", textDecoration: session.cancelled ? "line-through" : "none" }}>{type.label}</span>
+            {session.cancelled && <span style={{ fontSize: 9, color: "#fff", background: "#6B7280", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>CANCELLED</span>}
+            {!session.cancelled && session.linkedIds?.length > 0 && <span className="linked-badge">linked</span>}
           </div>
-          {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
+          {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: session.cancelled ? "#9CA3AF" : "#1A2130", marginBottom: 2, textDecoration: session.cancelled ? "line-through" : "none" }}>{session.participantId}</div>}
           {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDateLong(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
-          {session.notes && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
+          {session.notes && !session.cancelled && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <StatusBadge session={session} />
-          {session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
-          {isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
+          {!session.cancelled && session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
+          {!session.cancelled && isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
         </div>
       </div>
-      {currentUser && (
+      {currentUser && !session.cancelled && (
         <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid #F0EEE8" }}>
           <button
             onClick={e => { e.stopPropagation(); toggleAvailability(session.id, currentUser); }}
@@ -805,11 +822,12 @@ function SessionCard({ session, active, onClick, currentUser, availability, togg
 
 // ─── Session Detail ───────────────────────────────────────────────────────────
 
-function SessionDetail({ session, sessions, updateSessions, team, availability, toggleAvailability, toggleConfirm, removeSession, toggleCalendarAdded }) {
+function SessionDetail({ session, sessions, updateSessions, team, availability, toggleAvailability, toggleConfirm, removeSession, toggleCalendarAdded, cancelSession }) {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ date: session.date || "", time: session.time || "", participantId: session.participantId || "", notes: session.notes || "" });
   const [showEditNotes, setShowEditNotes] = useState(!!session.notes);
   const [overrideData, setOverrideData] = useState(null); // null = closed, object = editing
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const type = SESSION_TYPES[session.type];
   const required = type.required;
   const confirmed = session.confirmedStaff || [];
@@ -819,6 +837,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
     setShowEditNotes(!!session.notes);
     setEditing(false);
     setOverrideData(null);
+    setShowCancelConfirm(false);
   }, [session.id]);
 
   const editMorningPreview = calcMorningFromEvening(editData.date, editData.time);
@@ -853,11 +872,49 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
           {session.participantId && !editing && <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130", marginBottom: 2 }}>{session.participantId}</div>}
           {!editing && <div style={{ fontSize: 13, color: "#6B7A8D" }}>{session.date ? formatDate(session.date, session.time) : <span style={{ fontStyle: "italic", color: "#9AA0AA" }}>Date not yet set</span>}</div>}
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {session.type !== "morning" && <button className="btn btn-ghost" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit"}</button>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {!session.cancelled && session.type !== "morning" && <button className="btn btn-ghost" onClick={() => { setEditing(!editing); setShowCancelConfirm(false); }}>{editing ? "Cancel" : "Edit"}</button>}
+          {!session.cancelled && !showCancelConfirm && (
+            <button className="btn btn-ghost" style={{ color: "#B45309", borderColor: "#FCD34D", background: "#FFFBEB" }} onClick={() => { setShowCancelConfirm(true); setEditing(false); }}>
+              Cancel Booking
+            </button>
+          )}
+          {session.cancelled && (
+            <button className="btn btn-ghost" style={{ color: "#276644", borderColor: "#6EE7B7", background: "#F0FDF4" }} onClick={() => cancelSession(session.id)}>
+              Uncancel
+            </button>
+          )}
           <button className="btn btn-danger" onClick={() => removeSession(session.id)}>{session.linkedIds?.length > 0 ? "Remove Pair" : "Remove"}</button>
         </div>
       </div>
+
+      {showCancelConfirm && !session.cancelled && (
+        <div style={{ marginBottom: 20, padding: "14px 16px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FCD34D" }}>
+          <div style={{ fontSize: 13, fontWeight: "600", color: "#92400E", marginBottom: 6 }}>
+            Cancel this booking{session.linkedIds?.length > 0 ? " (and its linked session)" : ""}?
+          </div>
+          <div style={{ fontSize: 12, color: "#A16207", marginBottom: 12 }}>
+            The session will be kept in the list but marked as cancelled. You can uncancel it at any time.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { cancelSession(session.id); setShowCancelConfirm(false); }}
+              style={{ padding: "6px 16px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: "700", background: "#B45309", color: "#fff", border: "none" }}>
+              Yes, Cancel Booking
+            </button>
+            <button className="btn btn-ghost" onClick={() => setShowCancelConfirm(false)}>No, Keep It</button>
+          </div>
+        </div>
+      )}
+
+      {session.cancelled && (
+        <div style={{ marginBottom: 20, padding: "12px 16px", background: "#F3F4F6", borderRadius: 8, border: "1px solid #D1D5DB", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 18, color: "#6B7280" }}>✕</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: "700", color: "#374151" }}>Booking Cancelled</div>
+            <div style={{ fontSize: 12, color: "#6B7280" }}>This session has been cancelled. Use "Uncancel" to restore it.</div>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <div style={{ background: "#F7F5F2", borderRadius: 8, padding: 16, marginBottom: 20, border: "1px solid #E4E0DA" }}>
@@ -940,7 +997,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
         </div>
       )}
 
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 20, opacity: session.cancelled ? 0.4 : 1, pointerEvents: session.cancelled ? "none" : "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div className="section-title" style={{ marginBottom: 0 }}>Confirm Staff</div>
           <span style={{ fontSize: 11, color: confirmed.length >= required ? "#276644" : "#9AA0AA" }}>{confirmed.length}/{required} confirmed</span>
@@ -979,7 +1036,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
       </div>
 
       {/* Outlook calendar lock-in */}
-      {session.date && (
+      {session.date && !session.cancelled && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-title">Outlook Calendar</div>
           {!isFullyConfirmed(session) ? (
@@ -1022,8 +1079,8 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
   const confirmedMembers = session.confirmedStaff || [];
   return (
     <button className="cal-chip" onClick={onClick}
-      style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "7px 8px" : "6px 8px" }}
-      title={`${t.label}${session.participantId ? " — " + session.participantId : ""}${session.time ? " · " + session.time : ""}`}
+      style={{ background: session.cancelled ? "#F3F4F6" : t.bg, color: session.cancelled ? "#9CA3AF" : t.textColor, border: `1px solid ${session.cancelled ? "#D1D5DB" : t.color + "66"}`, padding: compact ? "7px 8px" : "6px 8px", opacity: session.cancelled ? 0.7 : 1 }}
+      title={`${t.label}${session.participantId ? " — " + session.participantId : ""}${session.time ? " · " + session.time : ""}${session.cancelled ? " · CANCELLED" : ""}`}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 4, justifyContent: "space-between" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -1031,7 +1088,12 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
             {typeShort}{session.participantId ? ` · ${session.participantId}` : ""}
           </div>
           {session.time && <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.3 }}>{formatTime12(session.time)}</div>}
-          {confirmedMembers.length > 0 && (
+          {session.cancelled && (
+            <div style={{ marginTop: 3 }}>
+              <span style={{ fontSize: 8, color: "#6B7280", fontWeight: "700", lineHeight: "1.6", background: "#E5E7EB", borderRadius: 2, padding: "0 4px" }}>cancelled</span>
+            </div>
+          )}
+          {!session.cancelled && confirmedMembers.length > 0 && (
             <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3, alignItems: "center" }}>
               <span style={{ fontSize: 8, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>
                 {session.calendarAdded ? "added to O.L" : "confirmed:"}
