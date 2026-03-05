@@ -1010,8 +1010,8 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
               <div key={member} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: isConfirmed ? "#F0FDF4" : "#fff", borderRadius: 6, border: `1px solid ${isConfirmed ? "#6EE7B7" : "#E4E0DA"}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: isConfirmed ? "600" : "normal", color: "#1A2130" }}>{member}</div>
-                  {avail === "available" && !isConfirmed && <span style={{ fontSize: 10, color: "#276644", background: "#E6F4EC", border: "1px solid #5AAA7A55", borderRadius: 10, padding: "1px 7px" }}>available</span>}
-                  {avail === "unavailable" && !isConfirmed && <span style={{ fontSize: 10, color: "#8A2020", background: "#FAE8E8", border: "1px solid #C0707055", borderRadius: 10, padding: "1px 7px" }}>unavailable</span>}
+                  {avail === "available" && !isConfirmed && <span style={{ fontSize: 10, color: "#276644", background: "#E6F4EC", border: "1px solid #5AAA7A55", borderRadius: 10, padding: "1px 7px" }}>Available</span>}
+                  {avail === "unavailable" && !isConfirmed && <span style={{ fontSize: 10, color: "#8A2020", background: "#FAE8E8", border: "1px solid #C0707055", borderRadius: 10, padding: "1px 7px" }}>Unavailable</span>}
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button className={`avail-chip ${avail === "available" ? "avail-available" : avail === "unavailable" ? "avail-unavailable" : "avail-none"}`} onClick={() => toggleAvailability(session.id, member)}>
@@ -1090,25 +1090,51 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
           {session.time && <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.3 }}>{formatTime12(session.time)}</div>}
           {session.cancelled && (
             <div style={{ marginTop: 3 }}>
-              <span style={{ fontSize: 8, color: "#6B7280", fontWeight: "700", lineHeight: "1.6", background: "#E5E7EB", borderRadius: 2, padding: "0 4px" }}>cancelled</span>
+              <span style={{ fontSize: 8, color: "#6B7280", fontWeight: "700", lineHeight: "1.6", background: "#E5E7EB", borderRadius: 2, padding: "0 4px" }}>Cancelled</span>
             </div>
           )}
-          {!session.cancelled && confirmedMembers.length > 0 && (
-            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3, alignItems: "center" }}>
-              <span style={{ fontSize: 8, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>
-                {session.calendarAdded ? "added to O.L" : "confirmed:"}
-              </span>
-              {confirmedMembers.map(m => (
-                <span key={m} style={{ fontSize: 9, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
-                  {m}
-                </span>
-              ))}
+          {!session.cancelled && session.calendarAdded && (
+            <div style={{ marginTop: 3 }}>
+              <div style={{ fontSize: 8, color: "#0F766E", fontWeight: "700", lineHeight: "1.8" }}>Added to Outlook</div>
+              {confirmedMembers.length > 0 && (
+                <div style={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 8, color: "#064E3B", fontWeight: "700", lineHeight: "1.6", flexShrink: 0 }}>Working:</span>
+                  {confirmedMembers.map(m => (
+                    <span key={m} style={{ fontSize: 9, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
+                      {m}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          {availMembers.length > 0 && (
-            <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3 }}>
+          {!session.cancelled && !session.calendarAdded && confirmedMembers.length > 0 && (
+            <div style={{ marginTop: 3 }}>
+              <div style={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center", marginBottom: 2 }}>
+                <span style={{ fontSize: 8, color: "#064E3B", fontWeight: "700", lineHeight: "1.6", flexShrink: 0 }}>Confirmed:</span>
+                {confirmedMembers.map(m => (
+                  <span key={m} style={{ fontSize: 9, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
+                    {m}
+                  </span>
+                ))}
+              </div>
+              {availMembers.filter(m => !confirmedMembers.includes(m)).length > 0 && (
+                <div style={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 8, color: "#15803D", fontWeight: "700", lineHeight: "1.6", flexShrink: 0 }}>Available:</span>
+                  {availMembers.filter(m => !confirmedMembers.includes(m)).map(m => (
+                    <span key={m} style={{ fontSize: 9, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
+                      {m}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!session.cancelled && !session.calendarAdded && confirmedMembers.length === 0 && availMembers.length > 0 && (
+            <div style={{ marginTop: 3, display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 8, color: "#15803D", fontWeight: "700", lineHeight: "1.6", flexShrink: 0 }}>Available:</span>
               {availMembers.map(m => (
-                <span key={m} style={{ fontSize: 9, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 4px", lineHeight: "1.6", fontStyle: "italic" }}>
+                <span key={m} style={{ fontSize: 9, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 4px", lineHeight: "1.6" }}>
                   {m}
                 </span>
               ))}
