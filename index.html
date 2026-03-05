@@ -1019,7 +1019,7 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
   const availMembers = availability
     ? TEAM.filter(m => availability[`${session.id}-${m}`] === "available")
     : [];
-  const confirmedMembers = session.calendarAdded ? (session.confirmedStaff || []) : [];
+  const confirmedMembers = session.confirmedStaff || [];
   return (
     <button className="cal-chip" onClick={onClick}
       style={{ background: t.bg, color: t.textColor, border: `1px solid ${t.color}66`, padding: compact ? "5px 6px" : "4px 6px" }}
