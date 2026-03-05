@@ -26,7 +26,6 @@ const JSONBIN_BIN_ID   = "69a52dddae596e708f56ec5a";    // e.g. 664abc123def...
 const { useState, useEffect, useRef, useCallback } = React;
 
 const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
-const MEMBER_ABBR = { Freida: "Fr", Alex: "Al", Mackenzie: "Mc", Brittany: "Br", Maddie: "Ma" };
 
 const SESSION_TYPES = {
   screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
@@ -1037,7 +1036,7 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
               <span style={{ fontSize: 7, color: "#064E3B", fontWeight: "700", lineHeight: "1.6" }}>conf:</span>
               {confirmedMembers.map(m => (
                 <span key={m} style={{ fontSize: 8, fontWeight: "700", color: "#064E3B", background: "#6EE7B7", borderRadius: 2, padding: "0 3px", lineHeight: "1.6" }}>
-                  {MEMBER_ABBR[m]}
+                  {m}
                 </span>
               ))}
             </div>
@@ -1046,7 +1045,7 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
             <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2 }}>
               {availMembers.map(m => (
                 <span key={m} style={{ fontSize: 8, fontWeight: "400", color: "#16A34A", background: "rgba(220,252,231,0.7)", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontStyle: "italic" }}>
-                  {MEMBER_ABBR[m]}
+                  {m}
                 </span>
               ))}
             </div>
