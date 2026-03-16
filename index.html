@@ -291,6 +291,7 @@ function App() {
   const [activeSession, setActiveSession] = useState(null);
   const [rightView, setRightView] = useState("week");
   const [sidebarView, setSidebarView] = useState("date"); // "date" | "status"
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [calWeekStart, setCalWeekStart] = useState(() => getMonday(new Date()));
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
   const [newSession, setNewSession] = useState({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
@@ -479,6 +480,9 @@ function App() {
 
   const pending = sessions.filter(s => !s.date);
   const booked = sessions.filter(s => s.date).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
+  const todayIso = sortKey(dateToKey(new Date()), "00:00");
+  const upcomingBooked = booked.filter(s => sortKey(s.date, s.time) >= todayIso);
+  const pastBooked = booked.filter(s => sortKey(s.date, s.time) < todayIso);
   const selectedSession = sessions.find(s => s.id === activeSession);
 
   // Status view groups
@@ -630,12 +634,29 @@ function App() {
                     </div>
                   </div>
                 )}
-                {booked.length > 0 && (
+                {upcomingBooked.length > 0 && (
                   <div>
-                    <div className="section-title">✓ Booked · {booked.length}</div>
+                    <div className="section-title">✓ Booked · {upcomingBooked.length}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                      {booked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                      {upcomingBooked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
                     </div>
+                  </div>
+                )}
+                {pastBooked.length > 0 && (
+                  <div style={{ marginTop: upcomingBooked.length > 0 || pending.length > 0 ? 18 : 0 }}>
+                    <button
+                      onClick={() => setArchiveOpen(o => !o)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, width: "100%", textAlign: "left", fontFamily: "Arial, Helvetica, sans-serif", marginBottom: archiveOpen ? 8 : 0 }}
+                    >
+                      <span className="section-title" style={{ marginBottom: 0, color: "#C0BDB8" }}>
+                        {archiveOpen ? "▾" : "▸"} Archive · {pastBooked.length}
+                      </span>
+                    </button>
+                    {archiveOpen && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {pastBooked.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -646,14 +667,36 @@ function App() {
                   { items: statusNeedsConfirm, label: "⏳ Available / Needs Confirmation", color: "#991B1B" },
                   { items: statusConfirmed,    label: "✓ Staff Confirmed",                 color: "#065F46" },
                   { items: statusInOutlook,    label: "◉ In Outlook",                      color: "#0F766E" },
-                ].map(({ items, label, color }) => items.length > 0 && (
-                  <div key={label} style={{ marginBottom: 22 }}>
-                    <div className="section-title" style={{ color }}>{label} · {items.length}</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                      {items.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                ].map(({ items, label, color }) => {
+                  const activeItems = items.filter(s => !s.date || sortKey(s.date, s.time) >= todayIso);
+                  const pastItems = items.filter(s => s.date && sortKey(s.date, s.time) < todayIso);
+                  if (activeItems.length === 0 && pastItems.length === 0) return null;
+                  return (
+                    <div key={label} style={{ marginBottom: 22 }}>
+                      <div className="section-title" style={{ color }}>{label} · {activeItems.length + pastItems.length}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {activeItems.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                      </div>
+                      {pastItems.length > 0 && (
+                        <div style={{ marginTop: activeItems.length > 0 ? 6 : 0 }}>
+                          <button
+                            onClick={() => setArchiveOpen(o => !o)}
+                            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: "4px 0", width: "100%", textAlign: "left", fontFamily: "Arial, Helvetica, sans-serif" }}
+                          >
+                            <span style={{ fontSize: 10, fontWeight: "700", letterSpacing: "0.08em", color: "#C0BDB8" }}>
+                              {archiveOpen ? "▾" : "▸"} Past · {pastItems.length}
+                            </span>
+                          </button>
+                          {archiveOpen && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 4 }}>
+                              {pastItems.map(s => <SessionCard key={s.id} session={s} active={activeSession === s.id && rightView === "detail"} onClick={() => selectSession(s.id)} currentUser={currentUser} availability={availability} toggleAvailability={toggleAvailability} />)}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
