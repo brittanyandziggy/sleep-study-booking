@@ -847,6 +847,7 @@ function SessionCard({ session, active, onClick, currentUser, availability, togg
           <StatusBadge session={session} />
           {!session.cancelled && session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
           {!session.cancelled && isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
+          {!session.cancelled && session.date && !isLockedIn(session) && <span style={{ fontSize: 9, color: "#92400E", background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 3, padding: "1px 5px", fontWeight: "600" }}>Not in Outlook</span>}
         </div>
       </div>
       {currentUser && !session.cancelled && (
