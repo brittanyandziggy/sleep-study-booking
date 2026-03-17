@@ -481,8 +481,9 @@ function App() {
   const pending = sessions.filter(s => !s.date);
   const booked = sessions.filter(s => s.date).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
   const todayIso = sortKey(dateToKey(new Date()), "00:00");
-  const upcomingBooked = booked.filter(s => sortKey(s.date, s.time) >= todayIso);
-  const pastBooked = booked.filter(s => sortKey(s.date, s.time) < todayIso);
+  const archiveCutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return sortKey(dateToKey(d), "00:00"); })();
+  const upcomingBooked = booked.filter(s => sortKey(s.date, s.time) >= archiveCutoff);
+  const pastBooked = booked.filter(s => sortKey(s.date, s.time) < archiveCutoff);
   const selectedSession = sessions.find(s => s.id === activeSession);
 
   // Status view groups
