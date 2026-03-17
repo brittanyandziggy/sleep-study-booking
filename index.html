@@ -507,6 +507,7 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#F7F5F2", color: "#1A2130", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column" }}>
       <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #F7F5F2; } ::-webkit-scrollbar-thumb { background: #D0CCC6; border-radius: 2px; }
         input, select, textarea { background: #fff; color: #1A2130; border: 1px solid #D0CCC6; border-radius: 4px; padding: 8px 12px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; outline: none; width: 100%; }
@@ -578,6 +579,19 @@ function App() {
                 >{name}</button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saving overlay */}
+      {saveStatus === "saving" && (
+        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, pointerEvents: "none" }}>
+          <div style={{ background: "rgba(26,33,48,0.72)", backdropFilter: "blur(3px)", borderRadius: 12, padding: "14px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" style={{ animation: "spin 0.9s linear infinite", flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6.5" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2.5"/>
+              <path d="M8 1.5A6.5 6.5 0 0 1 14.5 8" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontSize: 13, fontWeight: "600", color: "#fff", letterSpacing: "0.01em" }}>Saving — please don't navigate away…</span>
           </div>
         </div>
       )}
