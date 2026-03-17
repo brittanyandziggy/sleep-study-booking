@@ -30,7 +30,7 @@ const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
 const SESSION_TYPES = {
   screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
   evening:   { label: "Evening Study", color: "#1D58C4", bg: "#DBEAFE", textColor: "#0D2E7A", required: 2 },
-  morning:   { label: "Morning Study", color: "#EAB308", bg: "#FEF9C3", textColor: "#7A5800", required: 2 },
+  morning:   { label: "Morning Study", color: "#EAB308", bg: "#FEF9C3", textColor: "#7A5800", required: 1 },
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -488,7 +488,7 @@ function App() {
 
   // Status view groups
   const avail = availability || {};
-  const statusNeedsConfirm = sessions.filter(s => !isFullyConfirmed(s)).sort((a, b) => {
+  const statusNeedsConfirm = sessions.filter(s => !s.cancelled && !isFullyConfirmed(s)).sort((a, b) => {
     const aHas = TEAM.some(m => avail[`${a.id}-${m}`] === "available") ? 1 : 0;
     const bHas = TEAM.some(m => avail[`${b.id}-${m}`] === "available") ? 1 : 0;
     if (bHas !== aHas) return bHas - aHas;
@@ -497,8 +497,8 @@ function App() {
     if (!b.date) return -1;
     return sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time));
   });
-  const statusConfirmed = sessions.filter(s => isFullyConfirmed(s) && !s.calendarAdded).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
-  const statusInOutlook = sessions.filter(s => s.calendarAdded).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
+  const statusConfirmed = sessions.filter(s => !s.cancelled && isFullyConfirmed(s) && !s.calendarAdded).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
+  const statusInOutlook = sessions.filter(s => !s.cancelled && s.calendarAdded).sort((a, b) => sortKey(a.date, a.time).localeCompare(sortKey(b.date, b.time)));
   const morningPreview = calcMorningFromEvening(newSession.eveningDate, newSession.eveningTime);
 
   const saveLabel = saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Saved" : saveStatus === "error" ? "⚠ Save error" : "";
@@ -507,6 +507,7 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#F7F5F2", color: "#1A2130", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column" }}>
       <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #F7F5F2; } ::-webkit-scrollbar-thumb { background: #D0CCC6; border-radius: 2px; }
         input, select, textarea { background: #fff; color: #1A2130; border: 1px solid #D0CCC6; border-radius: 4px; padding: 8px 12px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; outline: none; width: 100%; }
@@ -578,6 +579,19 @@ function App() {
                 >{name}</button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saving overlay */}
+      {saveStatus === "saving" && (
+        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, pointerEvents: "none" }}>
+          <div style={{ background: "rgba(26,33,48,0.72)", backdropFilter: "blur(3px)", borderRadius: 12, padding: "14px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" style={{ animation: "spin 0.9s linear infinite", flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6.5" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2.5"/>
+              <path d="M8 1.5A6.5 6.5 0 0 1 14.5 8" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontSize: 13, fontWeight: "600", color: "#fff", letterSpacing: "0.01em" }}>Saving — please don't navigate away…</span>
           </div>
         </div>
       )}
@@ -665,7 +679,7 @@ function App() {
             {sidebarView === "status" && sessions.length > 0 && (
               <>
                 {[
-                  { items: statusNeedsConfirm, label: "⏳ Available / Needs Confirmation", color: "#991B1B" },
+                  { items: statusNeedsConfirm, label: "⏳ Needs Staff Confirmation", color: "#991B1B" },
                   { items: statusConfirmed,    label: "✓ Staff Confirmed",                 color: "#065F46" },
                   { items: statusInOutlook,    label: "◉ In Outlook",                      color: "#0F766E" },
                 ].map(({ items, label, color }) => {
@@ -847,6 +861,7 @@ function SessionCard({ session, active, onClick, currentUser, availability, togg
           <StatusBadge session={session} />
           {!session.cancelled && session.date && <span style={{ fontSize: 10, color: confirmed >= required ? "#276644" : "#9AA0AA" }}>{confirmed}/{required}</span>}
           {!session.cancelled && isLockedIn(session) && <span style={{ fontSize: 9, color: "#0F766E", background: "#CCFBF1", border: "1px solid #5EEAD4", borderRadius: 3, padding: "1px 5px", fontWeight: "700" }}>In Outlook</span>}
+          {!session.cancelled && session.date && !isLockedIn(session) && <span style={{ fontSize: 9, color: "#92400E", background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 3, padding: "1px 5px", fontWeight: "600" }}>Not in Outlook</span>}
         </div>
       </div>
       {currentUser && !session.cancelled && (
@@ -1220,18 +1235,35 @@ function Legend() {
 
 // ─── Week View ────────────────────────────────────────────────────────────────
 
+const STATUS_FILTERS = [
+  { key: "all",           label: "All" },
+  { key: "needs-confirm", label: "Needs Staff Confirmation" },
+  { key: "confirmed",     label: "Staff Confirmed" },
+  { key: "in-outlook",    label: "In Outlook" },
+];
+function matchesFilter(s, f) {
+  if (f === "all")           return true;
+  if (f === "needs-confirm") return !isFullyConfirmed(s);
+  if (f === "confirmed")     return isFullyConfirmed(s) && !s.calendarAdded;
+  if (f === "in-outlook")    return !!s.calendarAdded;
+  return true;
+}
+
 function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {} }) {
   const today = new Date(); today.setHours(0,0,0,0);
+  const [statusFilter, setStatusFilter] = React.useState("all");
+  const [cancelledOpen, setCancelledOpen] = React.useState(false);
   const fridayKey = dateToKey(addDays(weekStart, 4));
-  const hasFridayEvening = (sessionsByDate[fridayKey] || []).some(s => s.type === "evening");
+  const hasFridayEvening = (sessionsByDate[fridayKey] || []).some(s => s.type === "evening" && !s.cancelled);
   const colCount = hasFridayEvening ? 6 : 5;
   const DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
   const days = Array.from({ length: colCount }, (_, i) => addDays(weekStart, i));
   const fmtH = d => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const weekLabel = `${fmtH(weekStart)} – ${fmtH(addDays(weekStart, colCount - 1))}, ${weekStart.getFullYear()}`;
+  const allWeekCancelled = days.flatMap(day => (sessionsByDate[dateToKey(day)] || []).filter(s => s.cancelled));
   return (
     <div style={{ padding: "20px", height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{weekLabel}</div>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, -7))}>‹</button>
@@ -1239,14 +1271,22 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, 7))}>›</button>
         </div>
       </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {STATUS_FILTERS.map(f => (
+          <button key={f.key} onClick={() => setStatusFilter(f.key)}
+            style={{ border: "1px solid", borderRadius: 20, padding: "3px 12px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: statusFilter === f.key ? "700" : "normal", background: statusFilter === f.key ? "#1D58C4" : "#fff", color: statusFilter === f.key ? "#fff" : "#6B7A8D", borderColor: statusFilter === f.key ? "#1D58C4" : "#D0CCC6", transition: "all 0.15s" }}
+          >{f.label}</button>
+        ))}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${colCount},1fr)`, gap: 8, flex: 1 }}>
         {days.map((day, i) => {
           const key = dateToKey(day);
-          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+          const all = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+          const daySessions = all.filter(s => !s.cancelled && matchesFilter(s, statusFilter));
           const isToday = isSameDay(day, today);
           const isSat = i === 5;
           return (
-            <div key={key} style={{ background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : "#fff", border: `1px solid ${isToday ? "#A8B8D8" : isSat ? "#E4E0DA" : "#E4E0DA"}`, borderRadius: 8, padding: "10px 8px", display: "flex", flexDirection: "column", minHeight: 160, opacity: isSat ? 0.92 : 1 }}>
+            <div key={key} style={{ background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : "#fff", border: `1px solid ${isToday ? "#A8B8D8" : "#E4E0DA"}`, borderRadius: 8, padding: "10px 8px", display: "flex", flexDirection: "column", minHeight: 160, opacity: isSat ? 0.92 : 1 }}>
               <div style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 10, color: isSat ? "#C0BDB8" : "#9AA0AA", textTransform: "uppercase", letterSpacing: "0.06em" }}>{DAY_LABELS[i]}</div>
                 <div style={{ fontSize: 20, fontWeight: "700", color: isToday ? "#3A5FA5" : "#1A2130", lineHeight: 1.1 }}>{day.getDate()}</div>
@@ -1260,6 +1300,21 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           );
         })}
       </div>
+      {allWeekCancelled.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: "1px solid #E4E0DA", paddingTop: 10 }}>
+          <button onClick={() => setCancelledOpen(o => !o)}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Arial, Helvetica, sans-serif", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: "700", color: "#9AA0AA", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {cancelledOpen ? "▾" : "▸"} Cancelled this week · {allWeekCancelled.length}
+            </span>
+          </button>
+          {cancelledOpen && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {allWeekCancelled.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} availability={availability} />)}
+            </div>
+          )}
+        </div>
+      )}
       <Legend />
     </div>
   );
@@ -1269,6 +1324,7 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
 
 function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {} }) {
   const today = new Date(); today.setHours(0,0,0,0);
+  const [statusFilter, setStatusFilter] = React.useState("all");
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const startMonday = getMonday(firstDay);
@@ -1289,13 +1345,20 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
   }
   return (
     <div style={{ padding: "20px", display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{MONTH_NAMES[month]} {year}</div>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 0 ? {year:y-1,month:11} : {year:y,month:m-1})}>‹</button>
           <button className="btn-icon" onClick={() => { const n=new Date(); setMonth({year:n.getFullYear(),month:n.getMonth()}); }}>Today</button>
           <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 11 ? {year:y+1,month:0} : {year:y,month:m+1})}>›</button>
         </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {STATUS_FILTERS.map(f => (
+          <button key={f.key} onClick={() => setStatusFilter(f.key)}
+            style={{ border: "1px solid", borderRadius: 20, padding: "3px 12px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: statusFilter === f.key ? "700" : "normal", background: statusFilter === f.key ? "#1D58C4" : "#fff", color: statusFilter === f.key ? "#fff" : "#6B7A8D", borderColor: statusFilter === f.key ? "#1D58C4" : "#D0CCC6", transition: "all 0.15s" }}
+          >{f.label}</button>
+        ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", borderTop: "1px solid #E4E0DA", borderLeft: "1px solid #E4E0DA" }}>
         {DAY_SHORT.map(d => <div key={d} style={{ padding: "5px 6px", fontSize: 10, color: "#9AA0AA", textAlign: "center", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: "#FAFAF8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>)}
@@ -1305,7 +1368,9 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           const key = dateToKey(day);
           const inMonth = day.getMonth() === month;
           const isToday = isSameDay(day, today);
-          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
+          const allSessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
+          const daySessions = allSessions.filter(s => !s.cancelled && matchesFilter(s, statusFilter));
+          const hiddenCount = allSessions.filter(s => !s.cancelled && !matchesFilter(s, statusFilter)).length;
           return (
             <div key={key} style={{ minHeight: 110, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : !inMonth ? "#FAFAF8" : "#fff" }}>
               <div style={{ fontSize: 12, fontWeight: isToday ? "700" : "400", color: isToday ? "#3A5FA5" : !inMonth ? "#C0BDB8" : "#1A2130", marginBottom: 3 }}>
@@ -1313,6 +1378,7 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
               </div>
               {daySessions.slice(0,4).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact availability={availability} />)}
               {daySessions.length > 4 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{daySessions.length - 4} more</div>}
+              {hiddenCount > 0 && daySessions.length === 0 && <div style={{ fontSize: 9, color: "#C0BDB8", marginTop: 2, fontStyle: "italic" }}>{hiddenCount} filtered</div>}
             </div>
           );
         })}
