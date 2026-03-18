@@ -838,7 +838,7 @@ function StatusBadge({ session, size = 14 }) {
 // ─── Session Card ─────────────────────────────────────────────────────────────
 
 function SessionCard({ session, active, onClick, currentUser, availability, toggleAvailability }) {
-  const type = SESSION_TYPES[session.type];
+  const type = SESSION_TYPES[session.type] || SESSION_TYPES.evening;
   const confirmed = (session.confirmedStaff || []).length;
   const required = type.required;
   const myAvail = currentUser ? (availability || {})[`${session.id}-${currentUser}`] : null;
@@ -887,7 +887,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
   const [showEditNotes, setShowEditNotes] = useState(!!session.notes);
   const [overrideData, setOverrideData] = useState(null); // null = closed, object = editing
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const type = SESSION_TYPES[session.type];
+  const type = SESSION_TYPES[session.type] || SESSION_TYPES.evening;
   const required = type.required;
   const confirmed = session.confirmedStaff || [];
 
@@ -1041,7 +1041,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
         <div style={{ marginBottom: 20 }}>
           <div className="section-title">Linked Session</div>
           {linkedSessions.map(ls => {
-            const lt = SESSION_TYPES[ls.type];
+            const lt = SESSION_TYPES[ls.type] || SESSION_TYPES.evening;
             return (
               <div key={ls.id} style={{ background: "#F7F5F2", borderRadius: 6, padding: 10, display: "flex", alignItems: "center", gap: 10, border: "1px solid #E4E0DA" }}>
                 <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: lt.color }} />
@@ -1129,7 +1129,7 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
 // ─── Calendar Chip ────────────────────────────────────────────────────────────
 
 function CalChip({ session, onClick, compact = false, availability = null }) {
-  const t = SESSION_TYPES[session.type];
+  const t = SESSION_TYPES[session.type] || SESSION_TYPES.evening;
   const ok = isFullyConfirmed(session);
   const typeShort = session.type === "screening" ? "Screening" : session.type === "evening" ? "Evening" : "Morning";
   const availMembers = availability
@@ -1444,7 +1444,7 @@ function ListView({ sessions, team, onSelectSession, activeSession }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {grouped[dateKey].map(s => {
-                const t = SESSION_TYPES[s.type];
+                const t = SESSION_TYPES[s.type] || SESSION_TYPES.evening;
                 const isActive = s.id === activeSession;
                 return (
                   <div key={s.id} onClick={() => onSelectSession(s.id)}
@@ -1538,7 +1538,7 @@ function NeedsConfirmationView({ sessions, onSelectSession, activeSession }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {grouped[dateKey].map(s => {
-                const t = SESSION_TYPES[s.type];
+                const t = SESSION_TYPES[s.type] || SESSION_TYPES.evening;
                 const confirmed = s.confirmedStaff || [];
                 const required = t.required;
                 const stillNeeded = required - confirmed.length;
