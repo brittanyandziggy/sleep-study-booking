@@ -29,7 +29,7 @@ const TEAM = ["Freida", "Alex", "Mackenzie", "Brittany", "Maddie"];
 
 const SESSION_TYPES = {
   screening: { label: "Screening",     color: "#C05E10", bg: "#FEF0E0", textColor: "#7A3300", required: 1 },
-  evening:   { label: "Evening Study", color: "#1D58C4", bg: "#DBEAFE", textColor: "#0D2E7A", required: 2 },
+  evening:   { label: "Evening Study", color: "#1D58C4", bg: "#DBEAFE", textColor: "#0D2E7A", required: 1 },
   morning:   { label: "Morning Study", color: "#EAB308", bg: "#FEF9C3", textColor: "#7A5800", required: 1 },
 };
 
@@ -445,6 +445,11 @@ function App() {
     setRightView("detail");
   }
 
+  function addSessionForDate(dateKey) {
+    setNewSession(prev => ({ ...prev, date: dateKey, eveningDate: dateKey }));
+    setShowAdd(true);
+  }
+
   function handlePinSubmit() {
     if (btoa(pinInput.trim()) === PIN_B64) {
       sessionStorage.setItem("slp-pin", "1");
@@ -732,9 +737,9 @@ function App() {
                 <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} toggleCalendarAdded={toggleCalendarAdded} cancelSession={cancelSession} />
               </div>
             ) : rightView === "week" ? (
-              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
+              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
             ) : rightView === "month" ? (
-              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} />
+              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
             ) : rightView === "needs" ? (
               <NeedsConfirmationView sessions={sessions} onSelectSession={selectSession} activeSession={activeSession} />
             ) : (
@@ -855,7 +860,12 @@ function SessionCard({ session, active, onClick, currentUser, availability, togg
           </div>
           {session.participantId && <div style={{ fontSize: 12, fontWeight: "600", color: session.cancelled ? "#9CA3AF" : "#1A2130", marginBottom: 2, textDecoration: session.cancelled ? "line-through" : "none" }}>{session.participantId}</div>}
           {session.date ? <div style={{ fontSize: 11, color: "#6B7A8D" }}>{formatDateLong(session.date, session.time)}</div> : <div style={{ fontSize: 11, color: "#9AA0AA", fontStyle: "italic" }}>Date TBC</div>}
-          {session.notes && !session.cancelled && <div style={{ fontSize: 11, color: "#9AA0AA", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.notes}</div>}
+          {session.notes && !session.cancelled && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
+              <div style={{ fontSize: 11, color: "#9AA0AA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{session.notes}</div>
+              {!session.noteResolved && <span style={{ fontSize: 9, color: "#7A5800", background: "#FEF9C3", border: "1px solid #FCD34D", borderRadius: 2, padding: "0 4px", lineHeight: "1.6", fontWeight: "700", flexShrink: 0 }}>note</span>}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <StatusBadge session={session} />
@@ -903,7 +913,10 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
 
   function saveEdit() {
     updateSessions(prev => prev.map(s => {
-      if (s.id === session.id) return { ...s, date: editData.date || null, time: editData.time || null, participantId: editData.participantId || null, notes: editData.notes };
+      if (s.id === session.id) {
+        const noteChanged = editData.notes !== (s.notes || "");
+        return { ...s, date: editData.date || null, time: editData.time || null, participantId: editData.participantId || null, notes: editData.notes, ...(noteChanged ? { noteResolved: false } : {}) };
+      }
       if (session.type === "evening" && session.linkedIds?.includes(s.id) && s.type === "morning") {
         const base = { ...s, participantId: editData.participantId || null };
         if (s.manualMorningTime) return base;
@@ -996,7 +1009,17 @@ function SessionDetail({ session, sessions, updateSessions, team, availability, 
         </div>
       )}
 
-      {session.notes && !editing && <div style={{ color: "#6B7A8D", fontSize: 13, marginBottom: 18, padding: "10px 14px", background: "#F7F5F2", borderRadius: 6, borderLeft: `3px solid ${type.color}` }}>{session.notes}</div>}
+      {session.notes && !editing && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ color: "#6B7A8D", fontSize: 13, padding: "10px 14px", background: "#F7F5F2", borderRadius: 6, borderLeft: `3px solid ${type.color}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <span style={{ flex: 1, textDecoration: session.noteResolved ? "line-through" : "none", opacity: session.noteResolved ? 0.55 : 1 }}>{session.notes}</span>
+            {session.noteResolved
+              ? <button onClick={() => updateSessions(prev => prev.map(s => s.id !== session.id ? s : { ...s, noteResolved: false }))} style={{ fontSize: 10, color: "#7A5800", background: "#FEF9C3", border: "1px solid #FCD34D", borderRadius: 3, padding: "2px 7px", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", flexShrink: 0 }}>Reopen note</button>
+              : <button onClick={() => updateSessions(prev => prev.map(s => s.id !== session.id ? s : { ...s, noteResolved: true }))} style={{ fontSize: 10, color: "#276644", background: "#E6F4EC", border: "1px solid #5AAA7A", borderRadius: 3, padding: "2px 7px", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", flexShrink: 0 }}>Resolve note</button>
+            }
+          </div>
+        </div>
+      )}
       {session.type === "morning" && !overrideData && (
         <div style={{ marginBottom: 16, borderRadius: 8, border: "1px solid #E4E0DA", background: "#F7F5F2", padding: "12px 14px" }}>
           {session.manualMorningTime ? (
@@ -1202,6 +1225,9 @@ function CalChip({ session, onClick, compact = false, availability = null }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
           <StatusBadge session={session} size={13} />
+          {session.notes && !session.noteResolved && (
+            <span style={{ fontSize: 8, color: "#7A5800", background: "#FEF9C3", border: "1px solid #FCD34D", borderRadius: 2, padding: "0 3px", lineHeight: "1.6", fontWeight: "700" }}>note</span>
+          )}
         </div>
       </div>
     </button>
@@ -1249,7 +1275,7 @@ function matchesFilter(s, f) {
   return true;
 }
 
-function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {} }) {
+function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {}, onAddForDate }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [cancelledOpen, setCancelledOpen] = React.useState(false);
@@ -1293,15 +1319,22 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           const daySessions = all.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && (showPast || !isPast));
           const isToday = isSameDay(day, today);
           const isSat = i === 5;
+          const morningSessions = daySessions.filter(s => s.time && s.time < "12:00");
+          const eveningSessions = daySessions.filter(s => !s.time || s.time >= "12:00");
+          const hasBoth = morningSessions.length > 0 && eveningSessions.length > 0;
           return (
-            <div key={key} style={{ background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : "#fff", border: `1px solid ${isToday ? "#A8B8D8" : "#E4E0DA"}`, borderRadius: 8, padding: "10px 8px", display: "flex", flexDirection: "column", minHeight: 160, opacity: isSat ? 0.92 : 1 }}>
+            <div key={key}
+              onDoubleClick={e => { if (e.target.tagName !== "BUTTON" && !e.target.closest("button") && onAddForDate) onAddForDate(key); }}
+              style={{ background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : "#fff", border: `1px solid ${isToday ? "#A8B8D8" : "#E4E0DA"}`, borderRadius: 8, padding: "10px 8px", display: "flex", flexDirection: "column", minHeight: 160, opacity: isSat ? 0.92 : 1, cursor: "default" }}>
               <div style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 10, color: isSat ? "#C0BDB8" : "#9AA0AA", textTransform: "uppercase", letterSpacing: "0.06em" }}>{DAY_LABELS[i]}</div>
                 <div style={{ fontSize: 20, fontWeight: "700", color: isToday ? "#3A5FA5" : "#1A2130", lineHeight: 1.1 }}>{day.getDate()}</div>
                 <div style={{ fontSize: 10, color: "#C0BDB8" }}>{day.toLocaleDateString("en-GB",{month:"short"})}</div>
               </div>
               <div style={{ flex: 1 }}>
-                {daySessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} availability={availability} />)}
+                {morningSessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} availability={availability} />)}
+                {hasBoth && <div style={{ borderTop: "2px dashed #D8D5D0", margin: "5px 0" }} title="Morning sessions above · Evening sessions below" />}
+                {eveningSessions.map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} availability={availability} />)}
               </div>
               {daySessions.length === 0 && <div style={{ fontSize: 10, color: "#E0DDD9", textAlign: "center", marginTop: "auto" }}>—</div>}
             </div>
@@ -1330,7 +1363,7 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
 
 // ─── Month View ───────────────────────────────────────────────────────────────
 
-function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {} }) {
+function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {}, onAddForDate }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [showPast, setShowPast] = React.useState(false);
@@ -1387,13 +1420,21 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           const allSessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
           const daySessions = allSessions.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && (showPast || !isPast));
           const hiddenCount = allSessions.filter(s => !s.cancelled && !matchesFilter(s, statusFilter) && (showPast || !isPast)).length;
+          const dayMorning = daySessions.filter(s => s.time && s.time < "12:00");
+          const dayEvening = daySessions.filter(s => !s.time || s.time >= "12:00");
+          const hasMonthBoth = dayMorning.length > 0 && dayEvening.length > 0;
+          const visibleSessions = [...dayMorning, ...dayEvening];
           return (
-            <div key={key} style={{ minHeight: 110, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : !inMonth ? "#F5F4F2" : "#fff", opacity: isSat ? 0.92 : 1 }}>
+            <div key={key}
+              onDoubleClick={e => { if (e.target.tagName !== "BUTTON" && !e.target.closest("button") && onAddForDate) onAddForDate(key); }}
+              style={{ minHeight: 110, padding: "5px 5px", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: isToday ? "#F0F4FF" : isSat ? "#FAFAF8" : !inMonth ? "#F5F4F2" : "#fff", opacity: isSat ? 0.92 : 1, cursor: "default" }}>
               <div style={{ fontSize: 12, fontWeight: isToday ? "700" : "400", color: isToday ? "#3A5FA5" : (isSat || !inMonth) ? "#C0BDB8" : "#1A2130", marginBottom: 3 }}>
                 {isToday ? <span style={{ background: "#3A5FA5", color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>{day.getDate()}</span> : day.getDate()}
               </div>
-              {daySessions.slice(0,4).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact availability={availability} />)}
-              {daySessions.length > 4 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{daySessions.length - 4} more</div>}
+              {dayMorning.slice(0, 2).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact availability={availability} />)}
+              {hasMonthBoth && <div style={{ borderTop: "2px dashed #D8D5D0", margin: "3px 0" }} />}
+              {dayEvening.slice(0, hasMonthBoth ? 2 : 4).map(s => <CalChip key={s.id} session={s} onClick={() => onSelectSession(s.id)} compact availability={availability} />)}
+              {visibleSessions.length > 4 && <div style={{ fontSize: 10, color: "#9AA0AA", marginTop: 1 }}>+{visibleSessions.length - 4} more</div>}
               {hiddenCount > 0 && daySessions.length === 0 && <div style={{ fontSize: 9, color: "#C0BDB8", marginTop: 2, fontStyle: "italic" }}>{hiddenCount} filtered</div>}
             </div>
           );
