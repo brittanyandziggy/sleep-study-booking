@@ -465,9 +465,9 @@ function App() {
                 <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} />
               </div>
             ) : rightView === "week" ? (
-              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
+              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} currentUser={currentUser} />
             ) : rightView === "month" ? (
-              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
+              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} currentUser={currentUser} />
             ) : rightView === "needs" ? (
               <NeedsConfirmationView sessions={sessions} onSelectSession={selectSession} activeSession={activeSession} />
             ) : (
@@ -788,14 +788,26 @@ function Legend() {
 
 // ─── Week View ────────────────────────────────────────────────────────────────
 
-function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {}, onAddForDate }) {
+function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {}, onAddForDate, currentUser }) {
   const today = new Date(); today.setHours(0,0,0,0);
+  const [personFilter, setPersonFilter] = React.useState("all");
+  const [involvementFilter, setInvolvementFilter] = React.useState("any");
+
+  function matchesPersonFilter(s) {
+    if (personFilter === "all") return true;
+    const isAvail = (availability || {})[`${s.id}-${personFilter}`] === "available";
+    const isConfirmed = (s.confirmedStaff || []).includes(personFilter);
+    if (involvementFilter === "available") return isAvail;
+    if (involvementFilter === "confirmed") return isConfirmed;
+    return isAvail || isConfirmed;
+  }
+
   const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
   const fmtH = d => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const weekLabel = `${fmtH(weekStart)} – ${fmtH(addDays(weekStart, 4))}, ${weekStart.getFullYear()}`;
   return (
     <div style={{ padding: "20px", height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{weekLabel}</div>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, -7))}>‹</button>
@@ -803,10 +815,34 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, 7))}>›</button>
         </div>
       </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #F0EEE8" }}>
+        <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Person:</span>
+        {["all", ...TEAM].map(p => {
+          const isMe = p === currentUser;
+          const isSel = personFilter === p;
+          return (
+            <button key={p} onClick={() => { setPersonFilter(p); setInvolvementFilter("any"); }}
+              style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: isSel ? "700" : "normal", background: isSel ? "#3A5FA5" : isMe ? "#EEF2FA" : "#fff", color: isSel ? "#fff" : isMe ? "#1D58C4" : "#6B7A8D", borderColor: isSel ? "#3A5FA5" : isMe ? "#A8B8D8" : "#D0CCC6", transition: "all 0.15s" }}
+            >{p === "all" ? "All" : p}{isMe && !isSel ? " ★" : ""}</button>
+          );
+        })}
+        {personFilter !== "all" && (
+          <>
+            <span style={{ color: "#D0CCC6", margin: "0 2px" }}>·</span>
+            <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Show:</span>
+            {[["any","Any involvement"],["available","Available"],["confirmed","Confirmed"]].map(([key, label]) => (
+              <button key={key} onClick={() => setInvolvementFilter(key)}
+                style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: involvementFilter === key ? "700" : "normal", background: involvementFilter === key ? "#5AAA7A" : "#fff", color: involvementFilter === key ? "#fff" : "#6B7A8D", borderColor: involvementFilter === key ? "#5AAA7A" : "#D0CCC6", transition: "all 0.15s" }}
+              >{label}</button>
+            ))}
+          </>
+        )}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, flex: 1 }}>
         {days.map((day, i) => {
           const key = dateToKey(day);
-          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+          const allDay = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+          const daySessions = allDay.filter(s => matchesPersonFilter(s));
           const isToday = isSameDay(day, today);
           const morningSessions = daySessions.filter(s => s.time && s.time < "12:00");
           const eveningSessions = daySessions.filter(s => !s.time || s.time >= "12:00");
@@ -837,8 +873,20 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
 
 // ─── Month View ───────────────────────────────────────────────────────────────
 
-function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {}, onAddForDate }) {
+function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {}, onAddForDate, currentUser }) {
   const today = new Date(); today.setHours(0,0,0,0);
+  const [personFilter, setPersonFilter] = React.useState("all");
+  const [involvementFilter, setInvolvementFilter] = React.useState("any");
+
+  function matchesPersonFilter(s) {
+    if (personFilter === "all") return true;
+    const isAvail = (availability || {})[`${s.id}-${personFilter}`] === "available";
+    const isConfirmed = (s.confirmedStaff || []).includes(personFilter);
+    if (involvementFilter === "available") return isAvail;
+    if (involvementFilter === "confirmed") return isConfirmed;
+    return isAvail || isConfirmed;
+  }
+
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const startMonday = getMonday(firstDay);
@@ -859,13 +907,36 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
   }
   return (
     <div style={{ padding: "20px", display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: "600", color: "#1A2130" }}>{MONTH_NAMES[month]} {year}</div>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 0 ? {year:y-1,month:11} : {year:y,month:m-1})}>‹</button>
           <button className="btn-icon" onClick={() => { const n=new Date(); setMonth({year:n.getFullYear(),month:n.getMonth()}); }}>Today</button>
           <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 11 ? {year:y+1,month:0} : {year:y,month:m+1})}>›</button>
         </div>
+      </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Person:</span>
+        {["all", ...TEAM].map(p => {
+          const isMe = p === currentUser;
+          const isSel = personFilter === p;
+          return (
+            <button key={p} onClick={() => { setPersonFilter(p); setInvolvementFilter("any"); }}
+              style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: isSel ? "700" : "normal", background: isSel ? "#3A5FA5" : isMe ? "#EEF2FA" : "#fff", color: isSel ? "#fff" : isMe ? "#1D58C4" : "#6B7A8D", borderColor: isSel ? "#3A5FA5" : isMe ? "#A8B8D8" : "#D0CCC6", transition: "all 0.15s" }}
+            >{p === "all" ? "All" : p}{isMe && !isSel ? " ★" : ""}</button>
+          );
+        })}
+        {personFilter !== "all" && (
+          <>
+            <span style={{ color: "#D0CCC6", margin: "0 2px" }}>·</span>
+            <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Show:</span>
+            {[["any","Any involvement"],["available","Available"],["confirmed","Confirmed"]].map(([key, label]) => (
+              <button key={key} onClick={() => setInvolvementFilter(key)}
+                style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: involvementFilter === key ? "700" : "normal", background: involvementFilter === key ? "#5AAA7A" : "#fff", color: involvementFilter === key ? "#fff" : "#6B7A8D", borderColor: involvementFilter === key ? "#5AAA7A" : "#D0CCC6", transition: "all 0.15s" }}
+              >{label}</button>
+            ))}
+          </>
+        )}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", borderTop: "1px solid #E4E0DA", borderLeft: "1px solid #E4E0DA" }}>
         {DAY_SHORT.map(d => <div key={d} style={{ padding: "5px 6px", fontSize: 10, color: "#9AA0AA", textAlign: "center", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: "#FAFAF8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>)}
@@ -875,7 +946,8 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           const key = dateToKey(day);
           const inMonth = day.getMonth() === month;
           const isToday = isSameDay(day, today);
-          const daySessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
+          const allDay = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
+          const daySessions = allDay.filter(s => matchesPersonFilter(s));
           const dayMorning = daySessions.filter(s => s.time && s.time < "12:00");
           const dayEvening = daySessions.filter(s => !s.time || s.time >= "12:00");
           const hasMonthBoth = dayMorning.length > 0 && dayEvening.length > 0;
