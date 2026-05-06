@@ -296,9 +296,14 @@ function App() {
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
   const [newSession, setNewSession] = useState({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
   const [showNewNotes, setShowNewNotes] = useState(false);
+  const [showRestore, setShowRestore] = useState(false);
 
   const saveTimerRef = useRef(null);
   const latestDataRef = useRef({ sessions: [], availability: {}, personalUnavail: {} });
+  // Always mirrors sessions state — used by availability/personalUnavail savers to avoid reading a stale latestDataRef
+  const sessionsRef = useRef([]);
+  // History of the last 20 saves for undo/restore
+  const saveHistoryRef = useRef([]);
 
   // Load on mount
   useEffect(() => {
@@ -308,11 +313,19 @@ function App() {
         if (data.sessions) setSessions(data.sessions);
         if (data.availability) setAvailability(data.availability);
         if (data.personalUnavail) setPersonalUnavail(data.personalUnavail);
+        sessionsRef.current = data.sessions || [];
         latestDataRef.current = { sessions: data.sessions || [], availability: data.availability || {}, personalUnavail: data.personalUnavail || {} };
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+
+  function pushToHistory(data) {
+    saveHistoryRef.current = [
+      { ts: new Date().toISOString(), data: JSON.parse(JSON.stringify(data)) },
+      ...saveHistoryRef.current
+    ].slice(0, 20);
+  }
 
   // Debounced save — waits 1.5s after last change before writing
   const scheduleSave = useCallback((newSessions, newAvailability) => {
@@ -320,7 +333,9 @@ function App() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("saving");
     saveTimerRef.current = setTimeout(() => {
-      writeBin(latestDataRef.current)
+      const toSave = latestDataRef.current;
+      pushToHistory(toSave);
+      writeBin(toSave)
         .then(() => setSaveStatus("saved"))
         .catch(() => setSaveStatus("error"));
     }, 1500);
@@ -333,7 +348,10 @@ function App() {
       readBin().then(data => {
         setSessions(prev => {
           const incoming = data.sessions || [];
-          return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+          const next = JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+          sessionsRef.current = next;
+          latestDataRef.current = { ...latestDataRef.current, sessions: next };
+          return next;
         });
         setAvailability(prev => {
           const incoming = data.availability || {};
@@ -351,6 +369,7 @@ function App() {
   function updateSessions(fn) {
     setSessions(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
+      sessionsRef.current = next;
       scheduleSave(next, latestDataRef.current.availability);
       return next;
     });
@@ -359,7 +378,8 @@ function App() {
   function updateAvailability(fn) {
     setAvailability(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      scheduleSave(latestDataRef.current.sessions, next);
+      // Always use sessionsRef.current (always in sync with state) to avoid saving a stale empty array
+      scheduleSave(sessionsRef.current, next);
       return next;
     });
   }
@@ -367,16 +387,33 @@ function App() {
   function updatePersonalUnavail(fn) {
     setPersonalUnavail(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      latestDataRef.current = { ...latestDataRef.current, personalUnavail: next };
+      // Use sessionsRef.current to ensure we never overwrite sessions with a stale empty array
+      latestDataRef.current = { ...latestDataRef.current, sessions: sessionsRef.current, personalUnavail: next };
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveStatus("saving");
       saveTimerRef.current = setTimeout(() => {
-        writeBin(latestDataRef.current)
+        const toSave = latestDataRef.current;
+        pushToHistory(toSave);
+        writeBin(toSave)
           .then(() => setSaveStatus("saved"))
           .catch(() => setSaveStatus("error"));
       }, 1500);
       return next;
     });
+  }
+
+  function restoreSnapshot(snapshot) {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSessions(snapshot.sessions || []);
+    setAvailability(snapshot.availability || {});
+    setPersonalUnavail(snapshot.personalUnavail || {});
+    sessionsRef.current = snapshot.sessions || [];
+    latestDataRef.current = { sessions: snapshot.sessions || [], availability: snapshot.availability || {}, personalUnavail: snapshot.personalUnavail || {} };
+    setSaveStatus("saving");
+    writeBin(snapshot)
+      .then(() => setSaveStatus("saved"))
+      .catch(() => setSaveStatus("error"));
+    setShowRestore(false);
   }
 
   function addSession() {
@@ -609,6 +646,7 @@ function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {saveLabel && <span style={{ fontSize: 11, color: saveLabelColor }}>{saveLabel}</span>}
+          <button onClick={() => setShowRestore(true)} style={{ fontSize: 11, color: "#9AA0AA", background: "none", border: "1px solid #D0CCC6", borderRadius: 20, padding: "4px 12px", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif" }} title="Restore a previous save">⟲ Restore</button>
           {currentUser && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#EEF2FA", border: "1px solid #A8B8D8", borderRadius: 20, padding: "4px 12px" }}>
@@ -748,6 +786,48 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Restore snapshot modal */}
+      {showRestore && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowRestore(false)}>
+          <div className="modal" style={{ maxWidth: 480 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <div style={{ fontSize: 16, fontWeight: "bold" }}>Restore Previous Save</div>
+              <button onClick={() => setShowRestore(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#9AA0AA" }}>×</button>
+            </div>
+            {saveHistoryRef.current.length === 0 ? (
+              <div style={{ color: "#9AA0AA", fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+                No restore points yet. They appear here after the first save this session.
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: "#9AA0AA", marginBottom: 14 }}>
+                  Select a point to restore. This will immediately overwrite current data — the current state is also saved as a restore point before overwriting.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {saveHistoryRef.current.map((snap, i) => {
+                    const dt = new Date(snap.ts);
+                    const label = dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " — " + dt.toLocaleDateString("en-GB");
+                    const sCount = (snap.data.sessions || []).length;
+                    const aCount = Object.keys(snap.data.availability || {}).length;
+                    return (
+                      <button key={i} onClick={() => {
+                        pushToHistory({ sessions: sessionsRef.current, availability: latestDataRef.current.availability, personalUnavail: latestDataRef.current.personalUnavail });
+                        restoreSnapshot(snap.data);
+                      }} style={{ background: "#F7F5F2", border: "1px solid #E4E0DA", borderRadius: 8, padding: "12px 14px", cursor: "pointer", textAlign: "left", fontFamily: "Arial, Helvetica, sans-serif", transition: "all 0.15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#3A5FA5"; e.currentTarget.style.background = "#EEF2FA"; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = "#E4E0DA"; e.currentTarget.style.background = "#F7F5F2"; }}>
+                        <div style={{ fontSize: 13, fontWeight: "600", color: "#1A2130", marginBottom: 3 }}>{i === 0 ? "Most recent save" : `${i + 1} saves ago`}</div>
+                        <div style={{ fontSize: 11, color: "#9AA0AA" }}>{label} · {sCount} session{sCount !== 1 ? "s" : ""} · {aCount} availability mark{aCount !== 1 ? "s" : ""}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Availability calendar modal */}
       {showAvailCal && currentUser && (
