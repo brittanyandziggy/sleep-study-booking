@@ -296,9 +296,14 @@ function App() {
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
   const [newSession, setNewSession] = useState({ type: "screening", date: "", time: "", participantId: "", notes: "", eveningDate: "", eveningTime: "" });
   const [showNewNotes, setShowNewNotes] = useState(false);
+  const [showRestore, setShowRestore] = useState(false);
 
   const saveTimerRef = useRef(null);
   const latestDataRef = useRef({ sessions: [], availability: {}, personalUnavail: {} });
+  // Always mirrors sessions state — used by availability/personalUnavail savers to avoid reading a stale latestDataRef
+  const sessionsRef = useRef([]);
+  // History of the last 20 saves for undo/restore
+  const saveHistoryRef = useRef([]);
 
   // Load on mount
   useEffect(() => {
@@ -308,11 +313,19 @@ function App() {
         if (data.sessions) setSessions(data.sessions);
         if (data.availability) setAvailability(data.availability);
         if (data.personalUnavail) setPersonalUnavail(data.personalUnavail);
+        sessionsRef.current = data.sessions || [];
         latestDataRef.current = { sessions: data.sessions || [], availability: data.availability || {}, personalUnavail: data.personalUnavail || {} };
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+
+  function pushToHistory(data) {
+    saveHistoryRef.current = [
+      { ts: new Date().toISOString(), data: JSON.parse(JSON.stringify(data)) },
+      ...saveHistoryRef.current
+    ].slice(0, 20);
+  }
 
   // Debounced save — waits 1.5s after last change before writing
   const scheduleSave = useCallback((newSessions, newAvailability) => {
@@ -320,7 +333,9 @@ function App() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("saving");
     saveTimerRef.current = setTimeout(() => {
-      writeBin(latestDataRef.current)
+      const toSave = latestDataRef.current;
+      pushToHistory(toSave);
+      writeBin(toSave)
         .then(() => setSaveStatus("saved"))
         .catch(() => setSaveStatus("error"));
     }, 1500);
@@ -333,7 +348,10 @@ function App() {
       readBin().then(data => {
         setSessions(prev => {
           const incoming = data.sessions || [];
-          return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+          const next = JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+          sessionsRef.current = next;
+          latestDataRef.current = { ...latestDataRef.current, sessions: next };
+          return next;
         });
         setAvailability(prev => {
           const incoming = data.availability || {};
@@ -351,6 +369,7 @@ function App() {
   function updateSessions(fn) {
     setSessions(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
+      sessionsRef.current = next;
       scheduleSave(next, latestDataRef.current.availability);
       return next;
     });
@@ -359,7 +378,8 @@ function App() {
   function updateAvailability(fn) {
     setAvailability(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      scheduleSave(latestDataRef.current.sessions, next);
+      // Always use sessionsRef.current (always in sync with state) to avoid saving a stale empty array
+      scheduleSave(sessionsRef.current, next);
       return next;
     });
   }
@@ -367,16 +387,33 @@ function App() {
   function updatePersonalUnavail(fn) {
     setPersonalUnavail(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      latestDataRef.current = { ...latestDataRef.current, personalUnavail: next };
+      // Use sessionsRef.current to ensure we never overwrite sessions with a stale empty array
+      latestDataRef.current = { ...latestDataRef.current, sessions: sessionsRef.current, personalUnavail: next };
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveStatus("saving");
       saveTimerRef.current = setTimeout(() => {
-        writeBin(latestDataRef.current)
+        const toSave = latestDataRef.current;
+        pushToHistory(toSave);
+        writeBin(toSave)
           .then(() => setSaveStatus("saved"))
           .catch(() => setSaveStatus("error"));
       }, 1500);
       return next;
     });
+  }
+
+  function restoreSnapshot(snapshot) {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSessions(snapshot.sessions || []);
+    setAvailability(snapshot.availability || {});
+    setPersonalUnavail(snapshot.personalUnavail || {});
+    sessionsRef.current = snapshot.sessions || [];
+    latestDataRef.current = { sessions: snapshot.sessions || [], availability: snapshot.availability || {}, personalUnavail: snapshot.personalUnavail || {} };
+    setSaveStatus("saving");
+    writeBin(snapshot)
+      .then(() => setSaveStatus("saved"))
+      .catch(() => setSaveStatus("error"));
+    setShowRestore(false);
   }
 
   function addSession() {
@@ -609,6 +646,7 @@ function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {saveLabel && <span style={{ fontSize: 11, color: saveLabelColor }}>{saveLabel}</span>}
+          <button onClick={() => setShowRestore(true)} style={{ fontSize: 11, color: "#9AA0AA", background: "none", border: "1px solid #D0CCC6", borderRadius: 20, padding: "4px 12px", cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif" }} title="Restore a previous save">⟲ Restore</button>
           {currentUser && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#EEF2FA", border: "1px solid #A8B8D8", borderRadius: 20, padding: "4px 12px" }}>
@@ -737,9 +775,9 @@ function App() {
                 <SessionDetail session={selectedSession} sessions={sessions} updateSessions={updateSessions} team={TEAM} availability={availability} toggleAvailability={toggleAvailability} toggleConfirm={toggleConfirm} removeSession={removeSession} toggleCalendarAdded={toggleCalendarAdded} cancelSession={cancelSession} />
               </div>
             ) : rightView === "week" ? (
-              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
+              <WeekView weekStart={calWeekStart} setWeekStart={setCalWeekStart} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} currentUser={currentUser} />
             ) : rightView === "month" ? (
-              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} />
+              <MonthView year={calMonth.year} month={calMonth.month} setMonth={setCalMonth} sessionsByDate={sessionsByDate} onSelectSession={selectSession} activeSession={activeSession} availability={availability} onAddForDate={addSessionForDate} currentUser={currentUser} />
             ) : rightView === "needs" ? (
               <NeedsConfirmationView sessions={sessions} onSelectSession={selectSession} activeSession={activeSession} />
             ) : (
@@ -748,6 +786,48 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Restore snapshot modal */}
+      {showRestore && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowRestore(false)}>
+          <div className="modal" style={{ maxWidth: 480 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <div style={{ fontSize: 16, fontWeight: "bold" }}>Restore Previous Save</div>
+              <button onClick={() => setShowRestore(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#9AA0AA" }}>×</button>
+            </div>
+            {saveHistoryRef.current.length === 0 ? (
+              <div style={{ color: "#9AA0AA", fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+                No restore points yet. They appear here after the first save this session.
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: "#9AA0AA", marginBottom: 14 }}>
+                  Select a point to restore. This will immediately overwrite current data — the current state is also saved as a restore point before overwriting.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {saveHistoryRef.current.map((snap, i) => {
+                    const dt = new Date(snap.ts);
+                    const label = dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " — " + dt.toLocaleDateString("en-GB");
+                    const sCount = (snap.data.sessions || []).length;
+                    const aCount = Object.keys(snap.data.availability || {}).length;
+                    return (
+                      <button key={i} onClick={() => {
+                        pushToHistory({ sessions: sessionsRef.current, availability: latestDataRef.current.availability, personalUnavail: latestDataRef.current.personalUnavail });
+                        restoreSnapshot(snap.data);
+                      }} style={{ background: "#F7F5F2", border: "1px solid #E4E0DA", borderRadius: 8, padding: "12px 14px", cursor: "pointer", textAlign: "left", fontFamily: "Arial, Helvetica, sans-serif", transition: "all 0.15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#3A5FA5"; e.currentTarget.style.background = "#EEF2FA"; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = "#E4E0DA"; e.currentTarget.style.background = "#F7F5F2"; }}>
+                        <div style={{ fontSize: 13, fontWeight: "600", color: "#1A2130", marginBottom: 3 }}>{i === 0 ? "Most recent save" : `${i + 1} saves ago`}</div>
+                        <div style={{ fontSize: 11, color: "#9AA0AA" }}>{label} · {sCount} session{sCount !== 1 ? "s" : ""} · {aCount} availability mark{aCount !== 1 ? "s" : ""}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Availability calendar modal */}
       {showAvailCal && currentUser && (
@@ -1275,11 +1355,23 @@ function matchesFilter(s, f) {
   return true;
 }
 
-function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {}, onAddForDate }) {
+function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, activeSession, availability = {}, onAddForDate, currentUser }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [cancelledOpen, setCancelledOpen] = React.useState(false);
   const [showPast, setShowPast] = React.useState(false);
+  const [personFilter, setPersonFilter] = React.useState("all");
+  const [involvementFilter, setInvolvementFilter] = React.useState("any");
+
+  function matchesPersonFilter(s) {
+    if (personFilter === "all") return true;
+    const isAvail = (availability || {})[`${s.id}-${personFilter}`] === "available";
+    const isConfirmed = (s.confirmedStaff || []).includes(personFilter);
+    if (involvementFilter === "available") return isAvail;
+    if (involvementFilter === "confirmed") return isConfirmed;
+    return isAvail || isConfirmed;
+  }
+
   const fridayKey = dateToKey(addDays(weekStart, 4));
   const hasFridayEvening = (sessionsByDate[fridayKey] || []).some(s => s.type === "evening" && !s.cancelled);
   const colCount = hasFridayEvening ? 6 : 5;
@@ -1298,7 +1390,7 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           <button className="btn-icon" onClick={() => setWeekStart(d => addDays(d, 7))}>›</button>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         {STATUS_FILTERS.map(f => (
           <button key={f.key} onClick={() => setStatusFilter(f.key)}
             style={{ border: "1px solid", borderRadius: 20, padding: "3px 12px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: statusFilter === f.key ? "700" : "normal", background: statusFilter === f.key ? "#1D58C4" : "#fff", color: statusFilter === f.key ? "#fff" : "#6B7A8D", borderColor: statusFilter === f.key ? "#1D58C4" : "#D0CCC6", transition: "all 0.15s" }}
@@ -1311,12 +1403,35 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
           </button>
         </div>
       </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #F0EEE8" }}>
+        <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Person:</span>
+        {["all", ...TEAM].map(p => {
+          const isMe = p === currentUser;
+          const isSel = personFilter === p;
+          return (
+            <button key={p} onClick={() => { setPersonFilter(p); setInvolvementFilter("any"); }}
+              style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: isSel ? "700" : "normal", background: isSel ? "#3A5FA5" : isMe ? "#EEF2FA" : "#fff", color: isSel ? "#fff" : isMe ? "#1D58C4" : "#6B7A8D", borderColor: isSel ? "#3A5FA5" : isMe ? "#A8B8D8" : "#D0CCC6", transition: "all 0.15s" }}
+            >{p === "all" ? "All" : p}{isMe && !isSel ? " ★" : ""}</button>
+          );
+        })}
+        {personFilter !== "all" && (
+          <>
+            <span style={{ color: "#D0CCC6", margin: "0 2px" }}>·</span>
+            <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Show:</span>
+            {[["any","Any involvement"],["available","Available"],["confirmed","Confirmed"]].map(([key, label]) => (
+              <button key={key} onClick={() => setInvolvementFilter(key)}
+                style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: involvementFilter === key ? "700" : "normal", background: involvementFilter === key ? "#5AAA7A" : "#fff", color: involvementFilter === key ? "#fff" : "#6B7A8D", borderColor: involvementFilter === key ? "#5AAA7A" : "#D0CCC6", transition: "all 0.15s" }}
+              >{label}</button>
+            ))}
+          </>
+        )}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${colCount},1fr)`, gap: 8, flex: 1 }}>
         {days.map((day, i) => {
           const key = dateToKey(day);
           const all = (sessionsByDate[key] || []).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
           const isPast = day < today;
-          const daySessions = all.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && (showPast || !isPast));
+          const daySessions = all.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && matchesPersonFilter(s) && (showPast || !isPast));
           const isToday = isSameDay(day, today);
           const isSat = i === 5;
           const morningSessions = daySessions.filter(s => s.time && s.time < "12:00");
@@ -1363,10 +1478,21 @@ function WeekView({ weekStart, setWeekStart, sessionsByDate, onSelectSession, ac
 
 // ─── Month View ───────────────────────────────────────────────────────────────
 
-function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {}, onAddForDate }) {
+function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, availability = {}, onAddForDate, currentUser }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [showPast, setShowPast] = React.useState(false);
+  const [personFilter, setPersonFilter] = React.useState("all");
+  const [involvementFilter, setInvolvementFilter] = React.useState("any");
+
+  function matchesPersonFilter(s) {
+    if (personFilter === "all") return true;
+    const isAvail = (availability || {})[`${s.id}-${personFilter}`] === "available";
+    const isConfirmed = (s.confirmedStaff || []).includes(personFilter);
+    if (involvementFilter === "available") return isAvail;
+    if (involvementFilter === "confirmed") return isConfirmed;
+    return isAvail || isConfirmed;
+  }
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const startMonday = getMonday(firstDay);
@@ -1394,7 +1520,7 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           <button className="btn-icon" onClick={() => setMonth(({year:y, month:m}) => m === 11 ? {year:y+1,month:0} : {year:y,month:m+1})}>›</button>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         {STATUS_FILTERS.map(f => (
           <button key={f.key} onClick={() => setStatusFilter(f.key)}
             style={{ border: "1px solid", borderRadius: 20, padding: "3px 12px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: statusFilter === f.key ? "700" : "normal", background: statusFilter === f.key ? "#1D58C4" : "#fff", color: statusFilter === f.key ? "#fff" : "#6B7A8D", borderColor: statusFilter === f.key ? "#1D58C4" : "#D0CCC6", transition: "all 0.15s" }}
@@ -1407,6 +1533,29 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           </button>
         </div>
       </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Person:</span>
+        {["all", ...TEAM].map(p => {
+          const isMe = p === currentUser;
+          const isSel = personFilter === p;
+          return (
+            <button key={p} onClick={() => { setPersonFilter(p); setInvolvementFilter("any"); }}
+              style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: isSel ? "700" : "normal", background: isSel ? "#3A5FA5" : isMe ? "#EEF2FA" : "#fff", color: isSel ? "#fff" : isMe ? "#1D58C4" : "#6B7A8D", borderColor: isSel ? "#3A5FA5" : isMe ? "#A8B8D8" : "#D0CCC6", transition: "all 0.15s" }}
+            >{p === "all" ? "All" : p}{isMe && !isSel ? " ★" : ""}</button>
+          );
+        })}
+        {personFilter !== "all" && (
+          <>
+            <span style={{ color: "#D0CCC6", margin: "0 2px" }}>·</span>
+            <span style={{ fontSize: 10, color: "#9AA0AA", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 2 }}>Show:</span>
+            {[["any","Any involvement"],["available","Available"],["confirmed","Confirmed"]].map(([key, label]) => (
+              <button key={key} onClick={() => setInvolvementFilter(key)}
+                style={{ border: "1px solid", borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontFamily: "Arial, Helvetica, sans-serif", fontWeight: involvementFilter === key ? "700" : "normal", background: involvementFilter === key ? "#5AAA7A" : "#fff", color: involvementFilter === key ? "#fff" : "#6B7A8D", borderColor: involvementFilter === key ? "#5AAA7A" : "#D0CCC6", transition: "all 0.15s" }}
+              >{label}</button>
+            ))}
+          </>
+        )}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", borderTop: "1px solid #E4E0DA", borderLeft: "1px solid #E4E0DA" }}>
         {["Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ padding: "5px 6px", fontSize: 10, color: d === "Sat" ? "#C0BDB8" : "#9AA0AA", textAlign: "center", borderRight: "1px solid #E4E0DA", borderBottom: "1px solid #E4E0DA", background: "#FAFAF8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>)}
       </div>
@@ -1418,8 +1567,8 @@ function MonthView({ year, month, setMonth, sessionsByDate, onSelectSession, ava
           const isSat = day.getDay() === 6;
           const isPast = day < today;
           const allSessions = (sessionsByDate[key] || []).sort((a, b) => (a.time||"").localeCompare(b.time||""));
-          const daySessions = allSessions.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && (showPast || !isPast));
-          const hiddenCount = allSessions.filter(s => !s.cancelled && !matchesFilter(s, statusFilter) && (showPast || !isPast)).length;
+          const daySessions = allSessions.filter(s => !s.cancelled && matchesFilter(s, statusFilter) && matchesPersonFilter(s) && (showPast || !isPast));
+          const hiddenCount = allSessions.filter(s => !s.cancelled && (!matchesFilter(s, statusFilter) || !matchesPersonFilter(s)) && (showPast || !isPast)).length;
           const dayMorning = daySessions.filter(s => s.time && s.time < "12:00");
           const dayEvening = daySessions.filter(s => !s.time || s.time >= "12:00");
           const hasMonthBoth = dayMorning.length > 0 && dayEvening.length > 0;
