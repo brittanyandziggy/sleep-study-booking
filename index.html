@@ -329,7 +329,11 @@ function App() {
 
   // Debounced save — waits 1.5s after last change before writing
   const scheduleSave = useCallback((newSessions, newAvailability) => {
-    latestDataRef.current = { sessions: newSessions, availability: newAvailability, personalUnavail: latestDataRef.current.personalUnavail || {} };
+    // Safety guard: never overwrite real sessions with an empty array caused by a race condition on load
+    const safeSessions = (newSessions.length === 0 && sessionsRef.current.length > 0)
+      ? sessionsRef.current
+      : newSessions;
+    latestDataRef.current = { sessions: safeSessions, availability: newAvailability, personalUnavail: latestDataRef.current.personalUnavail || {} };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus("saving");
     saveTimerRef.current = setTimeout(() => {
@@ -387,8 +391,9 @@ function App() {
   function updatePersonalUnavail(fn) {
     setPersonalUnavail(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      // Use sessionsRef.current to ensure we never overwrite sessions with a stale empty array
-      latestDataRef.current = { ...latestDataRef.current, sessions: sessionsRef.current, personalUnavail: next };
+      // Use sessionsRef.current — fall back to latestDataRef.sessions if ref is empty due to race on load
+      const safeSessions = sessionsRef.current.length > 0 ? sessionsRef.current : latestDataRef.current.sessions;
+      latestDataRef.current = { ...latestDataRef.current, sessions: safeSessions, personalUnavail: next };
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveStatus("saving");
       saveTimerRef.current = setTimeout(() => {
